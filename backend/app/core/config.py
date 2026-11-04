@@ -29,8 +29,9 @@ class Settings:
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = 150
     ALLOWED_EXTENSIONS: set = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-    MAX_FRAMES_TO_PROCESS: int = 300  # Cap processing to ~10s @ 30fps for responsive performance
-    DEFAULT_SAMPLE_RATE: int = 1       # 1 = every frame, 2 = every 2nd frame
+    MAX_FRAMES_TO_PROCESS: int = 1800  # Up to 60s @ 30fps
+    MAX_VIDEO_DURATION_SEC: float = 60.0
+    DEFAULT_SAMPLE_RATE: int = 1       # 1 = every frame
     
     # CORS
     CORS_ORIGINS: list = [

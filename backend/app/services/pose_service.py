@@ -337,7 +337,9 @@ class PoseService:
         bgr_frame: np.ndarray,
         landmarks: Optional[List[Any]],
         handedness: str = "Right",
-        phase_label: str = "Analyzing"
+        phase_label: str = "Analyzing",
+        metric_info: Optional[Dict[str, Any]] = None,
+        is_impact: bool = False
     ) -> np.ndarray:
         """
         Render clean cricket-analytics skeleton overlay on the frame.
@@ -347,14 +349,17 @@ class PoseService:
         h, w = annotated.shape[:2]
 
         if not landmarks or len(landmarks) < 33:
+            overlay = annotated.copy()
+            cv2.rectangle(overlay, (10, 10), (180, 40), (15, 23, 42), -1)
+            cv2.addWeighted(overlay, 0.75, annotated, 0.25, 0, annotated)
             cv2.putText(
                 annotated,
-                "Pose tracking: Striker occluded / low visibility",
-                (20, 40),
+                "No pose detected",
+                (18, 30),
                 cv2.FONT_HERSHEY_SIMPLEX,
-                0.6,
-                (0, 165, 255),
-                2,
+                0.45,
+                (148, 163, 184),
+                1,
                 cv2.LINE_AA
             )
             return annotated
@@ -405,15 +410,16 @@ class PoseService:
 
         # Draw Top HUD Banner
         overlay = annotated.copy()
-        cv2.rectangle(overlay, (10, 10), (340, 65), (15, 23, 42), -1)
+        hud_h = 78 if metric_info else 65
+        cv2.rectangle(overlay, (10, 10), (370, hud_h), (15, 23, 42), -1)
         cv2.addWeighted(overlay, 0.75, annotated, 0.25, 0, annotated)
 
         cv2.putText(
             annotated,
-            f"CricketIQ | Striker Track Locked",
-            (20, 32),
+            "CricketIQ | Striker Track Locked",
+            (20, 28),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.50,
+            0.46,
             (56, 189, 248),
             2,
             cv2.LINE_AA
@@ -421,13 +427,49 @@ class PoseService:
         cv2.putText(
             annotated,
             f"Phase: {phase_label} | Handedness: {handedness}",
-            (20, 54),
+            (20, 48),
             cv2.FONT_HERSHEY_SIMPLEX,
-            0.42,
+            0.40,
             (148, 163, 184),
             1,
             cv2.LINE_AA
         )
+
+        # Draw joint angle metrics if available
+        if metric_info:
+            knee = metric_info.get("lead_knee_angle")
+            elbow = metric_info.get("lead_elbow_angle")
+            lean = metric_info.get("torso_inclination")
+            k_str = f"{knee:.0f}deg" if knee is not None else "--"
+            e_str = f"{elbow:.0f}deg" if elbow is not None else "--"
+            l_str = f"{lean:.0f}deg" if lean is not None else "--"
+            cv2.putText(
+                annotated,
+                f"Knee: {k_str} | Elbow: {e_str} | Lean: {l_str}",
+                (20, 68),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.38,
+                (127, 234, 53),
+                1,
+                cv2.LINE_AA
+            )
+
+        # Highlight impact frame
+        if is_impact:
+            badge_w = 150
+            cv2.rectangle(annotated, (w - badge_w - 15, 12), (w - 15, 42), (53, 234, 127), -1)
+            cv2.putText(
+                annotated,
+                "IMPACT FRAME",
+                (w - badge_w - 5, 33),
+                cv2.FONT_HERSHEY_SIMPLEX,
+                0.48,
+                (5, 5, 5),
+                2,
+                cv2.LINE_AA
+            )
+
+        return annotated
 
         return annotated
 

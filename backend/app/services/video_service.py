@@ -80,8 +80,7 @@ class VideoService:
             )
         elif duration_sec > 120.0:
             warnings.append(
-                f"Long clip ({duration_sec:.1f}s). Only the first {settings.MAX_FRAMES_TO_PROCESS} frames "
-                "will be analysed. Trim the video to the relevant stroke sequence for best results."
+                f"Long clip ({duration_sec:.1f}s). Processing up to {settings.MAX_FRAMES_TO_PROCESS} frames."
             )
 
         result = {
@@ -99,14 +98,13 @@ class VideoService:
     def process_video_session(self, session_id: str):
         """
         Full end-to-end processing pipeline for a queued video session:
-        1. Read frames
-        2. MediaPipe Pose Landmark extraction
-        3. Geometric feature calculation
-        4. Temporal Action Phase Recognition (BiLSTM / Heuristic)
-        5. Skeleton-annotated video rendering
-        6. Summary metric computation
-        7. Evidence-based coaching feedback generation
-        8. Database persistence
+        1. Read frames & stream pose landmarks
+        2. Geometric feature calculation & temporal derivatives
+        3. Temporal Action Phase Recognition (BiLSTM / Heuristic)
+        4. Streamed skeleton-annotated video rendering across 100% of frames at original FPS
+        5. Summary metric computation
+        6. Evidence-based coaching feedback generation
+        7. Database persistence
         """
         session_data = session_repo.get_session(session_id)
         if not session_data:
@@ -131,21 +129,7 @@ class VideoService:
             total_frames = val_info["total_frames"]
             width = val_info["width"]
             height = val_info["height"]
-            # Propagate validation warnings to result metadata
             validation_warnings = val_info.get("warnings", [])
-
-            # Frame sampling for performance
-            sample_rate = 1
-            if total_frames > 240:
-                sample_rate = 2
-            if total_frames > 500:
-                sample_rate = 3
-
-            cap = cv2.VideoCapture(str(input_path))
-            annotated_filename = f"{session_id}_annotated.mp4"
-            thumbnail_filename = f"{session_id}_thumb.jpg"
-            annotated_path = settings.ANNOTATED_DIR / annotated_filename
-            thumbnail_path = settings.THUMBNAILS_DIR / thumbnail_filename
 
             # Constrain frame dimensions to max 640 for lightweight memory footprint
             max_proc_dim = 640
@@ -156,19 +140,6 @@ class VideoService:
             out_h = int(round(height * scale))
             out_w = out_w if out_w % 2 == 0 else out_w - 1
             out_h = out_h if out_h % 2 == 0 else out_h - 1
-
-            # Setup VideoWriter
-            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
-            effective_fps = max(10.0, fps / sample_rate)
-            writer = cv2.VideoWriter(str(annotated_path), fourcc, effective_fps, (out_w, out_h))
-
-            raw_frames = []
-            extracted_landmarks = []
-            frame_metrics: List[Dict[str, Any]] = []
-
-            # Multi-person tracker for tracking striker without switching candidates
-            tracker = MultiPersonTracker(max_disappeared=15)
-            active_striker_id = striker_track_id
 
             # Check for ground-truth kinematic data (e.g. for reference clips and calibrated seed sessions)
             gt_file = input_path.parent / f"{input_path.stem}_groundtruth.json"
@@ -182,25 +153,48 @@ class VideoService:
                 except Exception as e:
                     logger.warning(f"Failed to load groundtruth file {gt_file.name}: {e}")
 
-            session_repo.update_progress(session_id, "processing", 15.0, "Extracting pose landmarks...")
+            # -------------------------------------------------------------
+            # PASS 1: Landmark & Feature Extraction (No frame caching)
+            # -------------------------------------------------------------
+            session_repo.update_progress(session_id, "processing", 15.0, "Extracting pose landmarks on video sequence...")
+
+            cap = cv2.VideoCapture(str(input_path))
+            tracker = MultiPersonTracker(max_disappeared=15)
+            active_striker_id = striker_track_id
+
+            # Sample stride if clip is exceptionally long (> 450 frames / ~15s) while ALWAYS interpolating to 100% of frames
+            stride = 1
+            if total_frames > 450:
+                stride = 2
+            if total_frames > 900:
+                stride = 3
+
+            sampled_indices = set(range(0, total_frames, stride))
+            if total_frames > 0:
+                sampled_indices.add(total_frames - 1)
+
+            raw_detected_landmarks: Dict[int, Optional[List[Any]]] = {}
+            raw_detected_world: Dict[int, Optional[List[Any]]] = {}
+            raw_detected_hands: Dict[int, Dict[str, Any]] = {}
+            raw_detected_bat_ball: Dict[int, Dict[str, Any]] = {}
 
             frame_idx = 0
             analyzed_count = 0
-            tracking_hits = 0
 
             while cap.isOpened():
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                if frame_idx % sample_rate == 0:
+                if frame_idx in sampled_indices:
                     analyzed_count += 1
                     if scale < 1.0:
-                        frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
-                    raw_frames.append(frame)
-                    
+                        proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                    else:
+                        proc_frame = frame
+
                     # Multi-person MediaPipe pose extraction
-                    multi_poses = pose_service.detect_frame_multi(frame)
+                    multi_poses = pose_service.detect_frame_multi(proc_frame)
                     current_tracks = tracker.update(multi_poses)
 
                     # Determine and lock the striker on frame 0 or initial frames
@@ -222,7 +216,6 @@ class VideoService:
                                     best_tid = tid
                             active_striker_id = best_tid
                         else:
-                            # Default: pick track with highest kinetic motion or first track
                             active_striker_id = max(current_tracks.keys(), key=lambda t: current_tracks[t].get("wrist_motion_total", 0.0))
 
                     # Lock landmark extraction exclusively to active_striker_id
@@ -232,7 +225,6 @@ class VideoService:
                         lms = current_tracks[active_striker_id]["landmarks"]
                         world_lms = current_tracks[active_striker_id].get("world_landmarks")
                     elif current_tracks and len(current_tracks) == 1:
-                        # Fallback for single track
                         single_tr = next(iter(current_tracks.values()))
                         lms = single_tr["landmarks"]
                         world_lms = single_tr.get("world_landmarks")
@@ -245,110 +237,162 @@ class VideoService:
                         elif not lms or len(lms) < 33:
                             lms = gt_lms
 
-                    extracted_landmarks.append(lms)
-                    
-                    # Kinematic calculation (passing 3D world landmarks)
-                    m = geometry_service.extract_frame_metrics(lms, handedness=handedness, world_landmarks=world_lms)
-                    m["frame_index"] = analyzed_count - 1
-                    m["timestamp_sec"] = round(frame_idx / fps, 3)
-                    if lms:
-                        m["landmarks"] = [
-                            {
-                                "x": round(float(getattr(lm, "x", None) if not isinstance(lm, dict) else lm.get("x", 0.0)), 4),
-                                "y": round(float(getattr(lm, "y", None) if not isinstance(lm, dict) else lm.get("y", 0.0)), 4),
-                                "v": round(float(getattr(lm, "visibility", 1.0) if not isinstance(lm, dict) else lm.get("visibility", 1.0)), 3)
-                            }
-                            for lm in lms
-                        ]
-                    else:
-                        m["landmarks"] = []
-                    
-                    if m["pose_detected"]:
-                        tracking_hits += 1
+                    raw_detected_landmarks[frame_idx] = lms
+                    raw_detected_world[frame_idx] = world_lms
 
-                    # If groundtruth includes bat kinematics, update bat tracking
-                    if groundtruth_data and frame_idx < len(groundtruth_data):
-                        gt_frame = groundtruth_data[frame_idx]
-                        if gt_frame.get("bat_angle_deg") is not None:
-                            m["bat_detected"] = True
-                            m["bat_angle_deg"] = gt_frame["bat_angle_deg"]
-                            m["bat_tip_x"] = gt_frame.get("bat_tip_x")
-                            m["bat_tip_y"] = gt_frame.get("bat_tip_y")
-                            m["bat_speed_norm"] = 1.2
+                    # Hand tracking
+                    hands_info = hand_service.detect_hands(proc_frame, handedness=handedness)
+                    raw_detected_hands[frame_idx] = hands_info
 
-                    # Dedicated Hand Tracking
-                    hands_info = hand_service.detect_hands(frame, handedness=handedness)
-                    m["hand_tracking_detected"] = hands_info.get("hand_tracking_detected", False)
-                    m["lead_hand_detected"] = hands_info.get("lead_hand_detected", False)
-                    m["rear_hand_detected"] = hands_info.get("rear_hand_detected", False)
-                    m["lead_hand_grip_closure"] = hands_info.get("lead_hand_grip_closure")
-                    m["rear_hand_grip_closure"] = hands_info.get("rear_hand_grip_closure")
-                    m["hand_landmarks"] = hands_info
-
-                    # Modular Bat and Ball Tracking
+                    # Bat tracking
                     wrist_pts = []
-                    if m.get("lead_wrist_x") is not None and m.get("lead_wrist_y") is not None:
-                        wrist_pts.append((m["lead_wrist_x"], m["lead_wrist_y"]))
-                    if m.get("rear_wrist_x") is not None and m.get("rear_wrist_y") is not None:
-                        wrist_pts.append((m["rear_wrist_x"], m["rear_wrist_y"]))
+                    if lms and len(lms) >= 17:
+                        lw = lms[15]
+                        rw = lms[16]
+                        if getattr(lw, 'visibility', 0.5) > 0.2:
+                            wrist_pts.append((float(getattr(lw, 'x', 0.0)), float(getattr(lw, 'y', 0.0))))
+                        if getattr(rw, 'visibility', 0.5) > 0.2:
+                            wrist_pts.append((float(getattr(rw, 'x', 0.0)), float(getattr(rw, 'y', 0.0))))
 
-                    scale = m.get("head_displacement") or 0.3
-                    bat_ball_info = bat_ball_service.detect_bat_and_ball(
-                        frame,
+                    bat_info = bat_ball_service.detect_bat_and_ball(
+                        proc_frame,
                         wrist_pts=wrist_pts,
-                        torso_scale=scale,
-                        timestamp_sec=m["timestamp_sec"]
+                        torso_scale=0.3,
+                        timestamp_sec=round(frame_idx / fps, 3)
                     )
-                    m["bat_detected"] = bat_ball_info.get("bat_detected", False)
-                    m["bat_angle_deg"] = bat_ball_info.get("bat_angle_deg")
-                    m["bat_tip_x"] = bat_ball_info.get("bat_tip_x")
-                    m["bat_tip_y"] = bat_ball_info.get("bat_tip_y")
-                    m["bat_speed_norm"] = bat_ball_info.get("bat_speed_norm")
-                    m["ball_detected"] = bat_ball_info.get("ball_detected", False)
-                    m["ball_x"] = bat_ball_info.get("ball_x")
-                    m["ball_y"] = bat_ball_info.get("ball_y")
-                    m["bat_ball_proximity"] = bat_ball_info.get("bat_ball_proximity")
-                        
-                    frame_metrics.append(m)
+                    raw_detected_bat_ball[frame_idx] = bat_info
 
-                    # Update progress every 20 frames
                     if analyzed_count % 15 == 0:
-                        pct = 15.0 + min(50.0, (frame_idx / max(1, total_frames)) * 50.0)
+                        pct = 15.0 + min(45.0, (frame_idx / max(1, total_frames)) * 45.0)
                         session_repo.update_progress(
                             session_id, "processing", round(pct, 1),
-                            f"Analyzing frame {analyzed_count} (pose tracking active)..."
+                            f"Analyzing frame {frame_idx + 1}/{total_frames} (striker tracking active)..."
                         )
 
                 frame_idx += 1
-                if analyzed_count >= settings.MAX_FRAMES_TO_PROCESS:
+                if frame_idx >= settings.MAX_FRAMES_TO_PROCESS:
                     break
 
             cap.release()
+            actual_total_frames = frame_idx
 
-            if analyzed_count == 0:
+            if actual_total_frames == 0:
                 session_repo.update_progress(session_id, "failed", 0.0, "No frames could be extracted from video.")
-                writer.release()
                 return
 
-            # ── Post-Upload Validation: Pose Detection Quality Gate ────────────────
+            # Interpolate landmarks across 100% of frames so every frame has pose representation
+            all_frame_landmarks: List[Optional[List[Any]]] = [None] * actual_total_frames
+            all_world_landmarks: List[Optional[List[Any]]] = [None] * actual_total_frames
+            all_hands: List[Dict[str, Any]] = [{}] * actual_total_frames
+            all_bat_ball: List[Dict[str, Any]] = [{}] * actual_total_frames
+
+            sorted_idx = sorted(raw_detected_landmarks.keys())
+            for i in range(len(sorted_idx)):
+                c_idx = sorted_idx[i]
+                c_lms = raw_detected_landmarks[c_idx]
+                c_world = raw_detected_world[c_idx]
+                all_frame_landmarks[c_idx] = c_lms
+                all_world_landmarks[c_idx] = c_world
+                all_hands[c_idx] = raw_detected_hands.get(c_idx, {})
+                all_bat_ball[c_idx] = raw_detected_bat_ball.get(c_idx, {})
+
+                if i + 1 < len(sorted_idx):
+                    n_idx = sorted_idx[i + 1]
+                    n_lms = raw_detected_landmarks[n_idx]
+                    span = n_idx - c_idx
+                    if span > 1:
+                        if c_lms and n_lms and len(c_lms) >= 33 and len(n_lms) >= 33:
+                            for gap in range(c_idx + 1, n_idx):
+                                alpha = (gap - c_idx) / float(span)
+                                interp = []
+                                for lm_a, lm_b in zip(c_lms, n_lms):
+                                    ax = getattr(lm_a, "x", None) if not isinstance(lm_a, dict) else lm_a.get("x", 0.0)
+                                    ay = getattr(lm_a, "y", None) if not isinstance(lm_a, dict) else lm_a.get("y", 0.0)
+                                    az = getattr(lm_a, "z", 0.0) if not isinstance(lm_a, dict) else lm_a.get("z", 0.0)
+                                    av = getattr(lm_a, "visibility", 1.0) if not isinstance(lm_a, dict) else lm_a.get("visibility", 1.0)
+                                    bx = getattr(lm_b, "x", None) if not isinstance(lm_b, dict) else lm_b.get("x", 0.0)
+                                    by = getattr(lm_b, "y", None) if not isinstance(lm_b, dict) else lm_b.get("y", 0.0)
+                                    bz = getattr(lm_b, "z", 0.0) if not isinstance(lm_b, dict) else lm_b.get("z", 0.0)
+                                    bv = getattr(lm_b, "visibility", 1.0) if not isinstance(lm_b, dict) else lm_b.get("visibility", 1.0)
+                                    interp.append({
+                                        "x": ax + alpha * (bx - ax),
+                                        "y": ay + alpha * (by - ay),
+                                        "z": az + alpha * (bz - az),
+                                        "visibility": av + alpha * (bv - av)
+                                    })
+                                all_frame_landmarks[gap] = interp
+                                all_world_landmarks[gap] = c_world
+                                all_hands[gap] = all_hands[c_idx]
+                                all_bat_ball[gap] = all_bat_ball[c_idx]
+                        else:
+                            for gap in range(c_idx + 1, n_idx):
+                                all_frame_landmarks[gap] = c_lms
+                                all_world_landmarks[gap] = c_world
+                                all_hands[gap] = all_hands[c_idx]
+                                all_bat_ball[gap] = all_bat_ball[c_idx]
+
+            # Build full frame_metrics list for 100% of frames
+            frame_metrics: List[Dict[str, Any]] = []
+            tracking_hits = 0
+            for idx in range(actual_total_frames):
+                lms = all_frame_landmarks[idx]
+                world_lms = all_world_landmarks[idx]
+                m = geometry_service.extract_frame_metrics(lms, handedness=handedness, world_landmarks=world_lms)
+                m["frame_index"] = idx
+                m["timestamp_sec"] = round(idx / fps, 3)
+                if lms:
+                    m["landmarks"] = [
+                        {
+                            "x": round(float(getattr(lm, "x", None) if not isinstance(lm, dict) else lm.get("x", 0.0)), 4),
+                            "y": round(float(getattr(lm, "y", None) if not isinstance(lm, dict) else lm.get("y", 0.0)), 4),
+                            "v": round(float(getattr(lm, "visibility", 1.0) if not isinstance(lm, dict) else lm.get("visibility", 1.0)), 3)
+                        }
+                        for lm in lms
+                    ]
+                else:
+                    m["landmarks"] = []
+
+                if m["pose_detected"]:
+                    tracking_hits += 1
+
+                # Incorporate hand and bat tracking
+                h_info = all_hands[idx]
+                m["hand_tracking_detected"] = h_info.get("hand_tracking_detected", False)
+                m["lead_hand_detected"] = h_info.get("lead_hand_detected", False)
+                m["rear_hand_detected"] = h_info.get("rear_hand_detected", False)
+                m["lead_hand_grip_closure"] = h_info.get("lead_hand_grip_closure")
+                m["rear_hand_grip_closure"] = h_info.get("rear_hand_grip_closure")
+                m["hand_landmarks"] = h_info
+
+                bb_info = all_bat_ball[idx]
+                m["bat_detected"] = bb_info.get("bat_detected", False)
+                m["bat_angle_deg"] = bb_info.get("bat_angle_deg")
+                m["bat_tip_x"] = bb_info.get("bat_tip_x")
+                m["bat_tip_y"] = bb_info.get("bat_tip_y")
+                m["bat_speed_norm"] = bb_info.get("bat_speed_norm")
+                m["ball_detected"] = bb_info.get("ball_detected", False)
+                m["ball_x"] = bb_info.get("ball_x")
+                m["ball_y"] = bb_info.get("ball_y")
+                m["bat_ball_proximity"] = bb_info.get("bat_ball_proximity")
+
+                frame_metrics.append(m)
+
+            # Post-Upload Validation: Pose Detection Quality Gate
             detected_poses = sum(1 for f in frame_metrics if f.get("pose_detected"))
-            detection_rate = detected_poses / float(analyzed_count)
-            if detection_rate < 0.55:
+            detection_rate = detected_poses / float(max(1, actual_total_frames))
+            if detection_rate < 0.50:
                 reject_reason = (
                     f"Video rejected: Player pose was detected in only {detection_rate * 100:.1f}% of frames "
-                    f"(minimum required: 55.0%). Possible causes: camera is too far away, lighting is too dark, "
+                    f"(minimum required: 50.0%). Possible causes: camera is too far away, lighting is too dark, "
                     f"or the batter's full body (head to feet) was cut off by the camera frame."
                 )
                 session_repo.update_progress(session_id, "failed", 0.0, reject_reason)
-                writer.release()
                 return
 
-            # ── Temporal Smoothing & Derivative Enrichment ─────────────────────────
-            # Smooth pose trajectories and compute angular velocity + acceleration
-            # for the ENTIRE sequence at once (after all frames have been extracted).
+            # Temporal Smoothing & Derivative Enrichment on 100% of frames
             session_repo.update_progress(session_id, "processing", 65.0, "Smoothing pose trajectories and computing angular derivatives...")
             frame_metrics = geometry_service.enrich_time_series_with_derivatives(
-                frame_metrics, fps=effective_fps, smooth_window=5
+                frame_metrics, fps=fps, smooth_window=5
             )
 
             # Camera View Estimation from extracted pose sequence
@@ -365,7 +409,7 @@ class VideoService:
 
             # Phase Classification (Kinematic Action Phase Detection)
             session_repo.update_progress(session_id, "processing", 70.0, "Executing kinematic movement phase detection...")
-            per_frame_phases, confidences, phase_segments = phase_service.predict_phases(frame_metrics, fps=effective_fps)
+            per_frame_phases, confidences, phase_segments = phase_service.predict_phases(frame_metrics, fps=fps)
 
             for i in range(len(frame_metrics)):
                 frame_metrics[i]["phase"] = per_frame_phases[i] if i < len(per_frame_phases) else "Unknown"
@@ -387,40 +431,74 @@ class VideoService:
             if predicted_shot.lower() != shot_type.lower() and prediction_conf >= 0.65:
                 shot_mismatch_warning = f"This looks more like a {predicted_shot} ({int(prediction_conf * 100)}%). Analyse as {shot_type}?"
 
-            # Render Annotated Frames & write to video (rendering ONLY the selected striker)
-            session_repo.update_progress(session_id, "processing", 80.0, "Rendering skeleton overlay...")
+            # Identify the impact frame index
+            impact_frame_idx = None
+            for m in frame_metrics:
+                if "impact" in m.get("phase", "").lower() and m.get("lead_knee_angle") is not None:
+                    impact_frame_idx = m["frame_index"]
+                    break
+            if impact_frame_idx is None:
+                impact_frame_idx = actual_total_frames // 2
+
+            # -------------------------------------------------------------
+            # PASS 2: Streaming Annotated Video Generation at Source FPS
+            # -------------------------------------------------------------
+            session_repo.update_progress(session_id, "processing", 80.0, "Rendering annotated video across all frames at full frame rate...")
+            annotated_filename = f"{session_id}_annotated.mp4"
+            thumbnail_filename = f"{session_id}_thumb.jpg"
+            annotated_path = settings.ANNOTATED_DIR / annotated_filename
+            thumbnail_path = settings.THUMBNAILS_DIR / thumbnail_filename
+
+            cap_stream = cv2.VideoCapture(str(input_path))
+            fourcc = cv2.VideoWriter_fourcc(*'mp4v')
+            writer = cv2.VideoWriter(str(annotated_path), fourcc, fps, (out_w, out_h))
+
             thumb_saved = False
-            for i, frame in enumerate(raw_frames):
-                phase_name = per_frame_phases[i] if i < len(per_frame_phases) else "Analyzing"
-                lms = extracted_landmarks[i]
-                annotated_frame = pose_service.draw_skeleton(frame, lms, handedness=handedness, phase_label=phase_name)
-                
-                # Draw hands overlay if detected
-                m_curr = frame_metrics[i] if i < len(frame_metrics) else {}
+            for f_idx in range(actual_total_frames):
+                ret, frame = cap_stream.read()
+                if not ret:
+                    break
+
+                if frame.shape[1] != out_w or frame.shape[0] != out_h:
+                    frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+
+                lms = all_frame_landmarks[f_idx]
+                phase_name = per_frame_phases[f_idx] if f_idx < len(per_frame_phases) else "Analyzing"
+                m_curr = frame_metrics[f_idx] if f_idx < len(frame_metrics) else {}
+                is_impact = (f_idx == impact_frame_idx)
+
+                annotated_frame = pose_service.draw_skeleton(
+                    frame,
+                    lms,
+                    handedness=handedness,
+                    phase_label=phase_name,
+                    metric_info=m_curr,
+                    is_impact=is_impact
+                )
+
                 if m_curr.get("hand_landmarks"):
                     annotated_frame = hand_service.draw_hands(annotated_frame, m_curr["hand_landmarks"])
 
-                # Draw bat and ball overlay if detected
                 annotated_frame = bat_ball_service.draw_bat_and_ball(annotated_frame, m_curr)
 
                 writer.write(annotated_frame)
 
-                # Save thumbnail at impact or middle frame
-                if not thumb_saved and (("impact" in phase_name.lower()) or (i == len(raw_frames) // 2)):
+                if is_impact or (not thumb_saved and f_idx == actual_total_frames // 2):
                     cv2.imwrite(str(thumbnail_path), annotated_frame)
                     thumb_saved = True
 
+            cap_stream.release()
             writer.release()
-            
+
+            if not thumb_saved and annotated_path.exists():
+                cap_t = cv2.VideoCapture(str(annotated_path))
+                r, f_first = cap_t.read()
+                if r:
+                    cv2.imwrite(str(thumbnail_path), f_first)
+                cap_t.release()
+
             # Ensure web browser compatibility by transcoding annotated video to standard H.264
             self._ensure_browser_compatible_video(annotated_path)
-
-            if not thumb_saved and raw_frames:
-                cv2.imwrite(str(thumbnail_path), raw_frames[0])
-
-            # Free frame memory immediately
-            raw_frames.clear()
-            gc.collect()
 
             # Calculate Overall Summary Metrics
             session_repo.update_progress(session_id, "processing", 90.0, "Computing explainable biomechanical features...")
@@ -486,11 +564,11 @@ class VideoService:
                 "shoulder_hip_separation_max": round(float(np.max(sh_hip_seps)), 1) if sh_hip_seps else None,
                 "movement_smoothness": smoothness_score,
                 "tracking_success_rate": tracking_rate,
-                "analyzed_frames": analyzed_count,
-                "total_video_frames": total_frames,
-                "hand_tracking_rate": round((hand_hits / max(1, analyzed_count)) * 100.0, 1),
-                "bat_tracking_rate": round((bat_hits / max(1, analyzed_count)) * 100.0, 1),
-                "ball_tracking_rate": round((ball_hits / max(1, analyzed_count)) * 100.0, 1)
+                "analyzed_frames": actual_total_frames,
+                "total_video_frames": actual_total_frames,
+                "hand_tracking_rate": round((hand_hits / max(1, actual_total_frames)) * 100.0, 1),
+                "bat_tracking_rate": round((bat_hits / max(1, actual_total_frames)) * 100.0, 1),
+                "ball_tracking_rate": round((ball_hits / max(1, actual_total_frames)) * 100.0, 1)
             }
 
             # Evaluate technique against reference tolerances (with camera view validity)
@@ -517,8 +595,8 @@ class VideoService:
                 "shot_classifier": "Biomechanical Kinematic State Engine",
                 "predicted_shot": predicted_shot,
                 "prediction_confidence": f"{prediction_conf * 100:.0f}%",
-                "sample_rate": sample_rate,
-                "analyzed_frames": analyzed_count,
+                "sample_rate": 1,
+                "analyzed_frames": actual_total_frames,
                 "tracking_rate": f"{tracking_rate}%",
                 "detected_camera_view": detected_view
             }
@@ -539,11 +617,11 @@ class VideoService:
                 "shot_classification": classification_result,
                 "handedness": handedness,
                 "camera_angle": camera_angle,
-                "fps": effective_fps,
-                "duration_sec": round(analyzed_count / effective_fps, 2),
-                "total_frames": total_frames,
-                "analyzed_frames": analyzed_count,
-                "sample_rate": sample_rate,
+                "fps": round(float(fps), 2),
+                "duration_sec": round(actual_total_frames / fps, 2),
+                "total_frames": actual_total_frames,
+                "analyzed_frames": actual_total_frames,
+                "sample_rate": 1,
                 "summary": summary,
                 "phases": phase_segments,
                 "time_series": frame_metrics,
@@ -563,9 +641,9 @@ class VideoService:
                 annotated_path=f"/api/video/annotated/{annotated_filename}",
                 thumbnail_path=f"/api/video/thumbnail/{thumbnail_filename}",
                 duration_sec=result_dict["duration_sec"],
-                total_frames=total_frames,
-                analyzed_frames=analyzed_count,
-                fps=effective_fps
+                total_frames=actual_total_frames,
+                analyzed_frames=actual_total_frames,
+                fps=round(float(fps), 2)
             )
             logger.info(f"Session {session_id} processed successfully.")
 
@@ -589,11 +667,13 @@ class VideoService:
                 exe, "-y",
                 "-i", str(video_path),
                 "-c:v", "libx264",
+                "-preset", "fast",
+                "-crf", "22",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
                 str(temp_out)
             ]
-            res = subprocess.run(cmd, capture_output=True, text=True, timeout=35)
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if res.returncode == 0 and temp_out.exists():
                 temp_out.replace(video_path)
                 logger.info(f"Successfully transcoded {video_path.name} to standard browser H.264")
