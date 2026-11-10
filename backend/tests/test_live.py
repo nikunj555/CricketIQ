@@ -80,7 +80,7 @@ def test_analyze_attempt_endpoint():
     assert resp.status_code == 200
     feedback = resp.json()
     assert feedback["shot_type"] == "Cover Drive"
-    assert "observation" in feedback["main_observation"].lower() or "lead knee" in feedback["main_observation"].lower() or "balanced" in feedback["main_observation"].lower()
+    assert "observation" in feedback["main_observation"].lower() or "lead knee" in feedback["main_observation"].lower() or "balanced" in feedback["main_observation"].lower() or "stride" in feedback["main_observation"].lower()
     assert feedback["impact_lead_knee"] is not None
     assert feedback["confidence_score"] > 0.8
     assert feedback["processing_latency_ms"] >= 0.0

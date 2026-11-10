@@ -168,6 +168,11 @@ def test_5_progress_trend_across_three_attempts():
     """Test 5: 3 attempts of same shot compute score trend, per-metric change indicator, and summary sentence."""
     shot = "Straight Drive"
 
+    # Ensure clean state for this shot
+    with session_repo._get_connection() as conn:
+        conn.execute("DELETE FROM sessions WHERE shot_type = ?", (shot,))
+        conn.commit()
+
     # Seed 3 sequential attempts
     attempts_data = [
         {"knee": 164.0, "torso": 16.0, "score": 68.0, "date": "2026-11-01"},

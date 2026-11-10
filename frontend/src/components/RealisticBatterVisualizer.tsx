@@ -93,6 +93,13 @@ export function findReferenceShot(nameOrId?: string | null): { name: string; dat
     }
   }
 
+  // Graceful fallback for non-standard, uncertain or empty queries
+  if (lower.includes('uncertain') || lower.includes('unknown') || lower.includes('no clear shot') || lower.includes('leave')) {
+    if (REFERENCE_SHOTS['Cover Drive']) {
+      return { name: 'Cover Drive', data: REFERENCE_SHOTS['Cover Drive'] };
+    }
+  }
+
   return null;
 }
 
@@ -246,10 +253,22 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
   const animFrameIdRef = useRef<number | null>(null);
   const lastTickTimeRef = useRef<number>(performance.now());
   const batTrailBufferRef = useRef<Array<{ x: number; y: number; alpha: number }>>([]);
+  const lastEmittedPhaseRef = useRef<number>(initialPhaseIndex);
+
+  // Keep refs up-to-date for loop to avoid tearing down RAF on every phase boundary
+  const activePhaseIndexRef = useRef(activePhaseIndex);
+  activePhaseIndexRef.current = activePhaseIndex;
+  const isPlayingRef = useRef(isPlaying);
+  isPlayingRef.current = isPlaying;
+  const playbackSpeedRef = useRef(playbackSpeed);
+  playbackSpeedRef.current = playbackSpeed;
+  const refShotInfoRef = useRef(refShotInfo);
+  refShotInfoRef.current = refShotInfo;
 
   // RESET on shot, cameraView, or handedness change (NO stale frames)
   useEffect(() => {
     setActivePhaseIndex(0);
+    activePhaseIndexRef.current = 0;
     setSubFrameProgress(0);
     batTrailBufferRef.current = [];
     lastTickTimeRef.current = performance.now();
@@ -267,17 +286,26 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     }
   }, [initialHandedness]);
 
-  // Sync external initialPhaseIndex if explicitly passed
+  // Sync external initialPhaseIndex if explicitly passed and different from current and last emitted
   useEffect(() => {
-    if (initialPhaseIndex !== undefined && initialPhaseIndex >= 0 && initialPhaseIndex < PHASES.length) {
+    if (
+      initialPhaseIndex !== undefined &&
+      initialPhaseIndex >= 0 &&
+      initialPhaseIndex < PHASES.length &&
+      initialPhaseIndex !== activePhaseIndex &&
+      initialPhaseIndex !== lastEmittedPhaseRef.current
+    ) {
       setActivePhaseIndex(initialPhaseIndex);
+      activePhaseIndexRef.current = initialPhaseIndex;
       setSubFrameProgress(0);
+      lastEmittedPhaseRef.current = initialPhaseIndex;
     }
   }, [initialPhaseIndex]);
 
   // Notify parent on phase change
   useEffect(() => {
-    if (onPhaseChange) {
+    if (onPhaseChange && activePhaseIndex !== lastEmittedPhaseRef.current) {
+      lastEmittedPhaseRef.current = activePhaseIndex;
       onPhaseChange(activePhaseIndex, PHASES[activePhaseIndex].name);
     }
   }, [activePhaseIndex, onPhaseChange]);
@@ -630,16 +658,19 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     if (!refShotInfo) return;
 
     const loop = (now: number) => {
-      if (isPlaying) {
+      if (isPlayingRef.current) {
         const deltaSec = Math.min(0.1, (now - lastTickTimeRef.current) / 1000);
-        const curKey = PHASE_KEYS[activePhaseIndex] || 'stance';
-        const weight = refShotInfo.data.phases[curKey]?.keyframe_pose?.duration_weight || 1.0;
-        const phaseDuration = (0.55 * weight) / Math.max(0.2, playbackSpeed);
+        const curPhase = activePhaseIndexRef.current;
+        const curKey = PHASE_KEYS[curPhase] || 'stance';
+        const weight = refShotInfoRef.current?.data.phases[curKey]?.keyframe_pose?.duration_weight || 1.0;
+        const phaseDuration = (0.55 * weight) / Math.max(0.2, playbackSpeedRef.current);
 
         setSubFrameProgress((prev) => {
           const next = prev + deltaSec / phaseDuration;
           if (next >= 1.0) {
-            setActivePhaseIndex((cur) => (cur + 1) % PHASES.length);
+            const nextPhase = (activePhaseIndexRef.current + 1) % PHASES.length;
+            activePhaseIndexRef.current = nextPhase;
+            setActivePhaseIndex(nextPhase);
             return 0.0;
           }
           return next;
@@ -655,7 +686,7 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     return () => {
       if (animFrameIdRef.current) cancelAnimationFrame(animFrameIdRef.current);
     };
-  }, [isPlaying, playbackSpeed, activePhaseIndex, refShotInfo]);
+  }, [refShotInfo]);
 
   // Render Anatomical Realistic Cricket Batter onto HTML5 Canvas
   useEffect(() => {
@@ -1585,9 +1616,9 @@ export function getPoseForShotAndPhase(
   const sinA = Math.sin(rad);
 
   const proj = (pt: [number, number, number]): [number, number] => {
-    const mx = pt[0] * mirror;
+    const mx = pt[0];
     const my = pt[1];
-    const mz = pt[2];
+    const mz = pt[2] * mirror;
     const xProj = mx * cosA - mz * sinA;
     const yProj = -my;
     return [xProj, yProj];

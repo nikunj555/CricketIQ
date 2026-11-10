@@ -143,7 +143,7 @@ class ShotClassifierService:
         if is_kneeling:
             family_scores["Sweep"] = 0.91
 
-        is_compact_swing = (w_span_x < 0.85 and w_span_y < 0.85)
+        is_compact_swing = (stride_ratio < 1.25 and w_span_y < 0.70 and peak_wrist_speed < 0.038)
         if is_compact_swing and not is_kneeling and family_scores["Leave / No Shot"] < 0.50:
             family_scores["Defensive"] = 0.88
 
@@ -195,24 +195,23 @@ class ShotClassifierService:
                 candidate_scores["Back-foot Punch"] = 0.55
 
         elif top_family == "Cross-bat":
-            if dy >= -0.30 or dx > 0.12:
-                if dx > 0.30:
-                    candidate_scores["Late Cut"] = 0.86
-                    candidate_scores["Square Cut"] = 0.80
-                    candidate_scores["Upper Cut"] = 0.72
-                else:
-                    candidate_scores["Square Cut"] = 0.89
-                    candidate_scores["Late Cut"] = 0.76
-                    candidate_scores["Back-foot Punch"] = 0.72
+            if dx > 0.20:
+                candidate_scores["Square Cut"] = 0.89
+                candidate_scores["Late Cut"] = 0.76
+                candidate_scores["Back-foot Punch"] = 0.70
+                candidate_scores["Pull Shot"] = 0.60
+            elif dx < -0.20:
+                candidate_scores["Pull Shot"] = 0.89
+                candidate_scores["Hook Shot"] = 0.80
+                candidate_scores["Square Cut"] = 0.60
+            elif min_lead_knee > 146.0 and mean_torso_lean < 14.0:
+                candidate_scores["Pull Shot"] = 0.89
+                candidate_scores["Hook Shot"] = 0.82
+                candidate_scores["Square Cut"] = 0.68
             else:
-                if min_lead_knee > 150.0 and mean_torso_lean < 14.0:
-                    candidate_scores["Hook Shot"] = 0.84
-                    candidate_scores["Pull Shot"] = 0.82
-                    candidate_scores["Square Cut"] = 0.65
-                else:
-                    candidate_scores["Pull Shot"] = 0.89
-                    candidate_scores["Hook Shot"] = 0.78
-                    candidate_scores["Square Cut"] = 0.64
+                candidate_scores["Square Cut"] = 0.88
+                candidate_scores["Back-foot Punch"] = 0.76
+                candidate_scores["Pull Shot"] = 0.72
 
         elif top_family == "Leg-side":
             if dx < -0.40:
@@ -232,7 +231,7 @@ class ShotClassifierService:
                 is_cover = dx > 0.08
                 is_off_drive = 0.02 < dx <= 0.08
             else:
-                is_straight = (dy <= -1.15 and w_span_y > 1.75) or (abs(dx) <= 0.05)
+                is_straight = (abs(dx) <= 0.06 and w_span_x < 0.25) or (dy <= -1.15 and w_span_y > 1.75) or (abs(dx) <= 0.03)
                 is_on_drive = (dx < -0.35 and dy > -0.70)
                 is_cover = not is_straight and not is_on_drive
                 is_off_drive = False
@@ -355,6 +354,31 @@ class ShotClassifierService:
             frame_metrics, camera_view=camera_view, handedness=mirrored_handedness
         )
 
+        # Complementary mirror counterparts in cricket:
+        # e.g. A right-hander's Cover Drive (off-side) mirrors naturally to an On Drive (leg-side).
+        MIRROR_EQUIVALENTS = {
+            "cover drive": "on drive",
+            "on drive": "cover drive",
+            "off drive": "on drive",
+            "square cut": "pull shot",
+            "pull shot": "square cut",
+            "hook shot": "square cut",
+            "late cut": "leg glance",
+            "leg glance": "late cut",
+            "flick shot": "off drive",
+            "sweep": "reverse sweep",
+            "reverse sweep": "sweep",
+            "straight drive": "straight drive",
+            "forward defensive": "forward defensive",
+            "back-foot defensive": "back-foot defensive",
+        }
+
+        # If mirrored shot matches directly or matches expected mirror counterpart, treat as agreed
+        if mirrored_shot.lower() == top_shot.lower() or mirrored_shot.lower() == MIRROR_EQUIVALENTS.get(top_shot.lower()):
+            tta_eval_shot = top_shot
+        else:
+            tta_eval_shot = mirrored_shot
+
         top_3_raw = [
             {"shot_name": s, "score": round(sc, 3), "confidence_pct": int(sc * 100)}
             for s, sc in sorted_candidates[:3]
@@ -384,7 +408,7 @@ class ShotClassifierService:
             top_candidates=top_3_raw,
             frame_metrics=frame_metrics,
             camera_view=camera_view,
-            mirrored_predicted_shot=mirrored_shot
+            mirrored_predicted_shot=tta_eval_shot
         )
 
         final_shot = conf_eval["shot"]
@@ -392,10 +416,9 @@ class ShotClassifierService:
         final_conf_pct = conf_eval["confidence"]
         conf_level = conf_eval["level"]
 
-        if conf_eval["level_code"] == "cant_tell" and final_shot.lower() != "leave / no shot attempted":
+        # Only label as "No clear shot detected" when clip is truly unrecognised
+        if conf_eval["level_code"] == "cant_tell" and final_shot.lower() in ("unrecognised shot", "no clear shot detected"):
             final_shot = "No clear shot detected"
-        elif conf_eval["level_code"] == "not_sure":
-            final_shot = "Uncertain"
 
         # Mismatch warning
         shot_mismatch_warning = None

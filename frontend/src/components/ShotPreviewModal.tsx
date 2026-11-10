@@ -53,6 +53,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
+  const [isVariationActive, setIsVariationActive] = useState<boolean>(false);
   const [variantId, setVariantId] = useState(0);
   const [replayToken, setReplayToken] = useState(0);
 
@@ -62,10 +63,14 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const shotAnimation: ShotAnimationDefinition | null = useMemo(() => {
     return getShotAnimation(shot.name || shot.id);
   }, [shot.id, shot.name]);
-  const animationVariant = useMemo(() => createShotVariant(variantId, shot.name || shot.id), [variantId, shot.id, shot.name]);
+  const animationVariant = useMemo(() => {
+    if (!isVariationActive) return undefined;
+    return createShotVariant(variantId, shot.name || shot.id);
+  }, [isVariationActive, variantId, shot.id, shot.name]);
 
   useEffect(() => {
-    setVariantId((previous) => nextShotVariant(previous, shot.name || shot.id).id);
+    setIsVariationActive(false);
+    setVariantId(0);
     setReplayToken(0);
   }, [shot.id]);
 
@@ -303,14 +308,48 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </span>
         </div>
 
-        <div className="flex items-center justify-between gap-3 -mt-3">
-          <span className="text-[11px] text-[#A5A9AD] font-mono">Variation {variantId + 1} of 3 · same authored {shot.name} movement</span>
-          <div className="flex gap-2">
-            <button onClick={() => setReplayToken((n) => n + 1)} className="px-3 py-1.5 rounded-lg border border-[#303438] bg-[#111315] text-[#F5F5F5] text-xs font-semibold flex items-center gap-1.5">
-              <RotateCcw className="w-3.5 h-3.5" /> Replay same
+        <div className="flex flex-wrap items-center justify-between gap-3 -mt-3">
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setIsVariationActive(false)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
+                !isVariationActive
+                  ? 'bg-[#7FEA35] text-black font-bold shadow-sm'
+                  : 'bg-[#111315] border border-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D]'
+              }`}
+            >
+              Original Motion
             </button>
-            <button onClick={() => setVariantId(nextShotVariant(variantId, shot.name || shot.id).id)} className="px-3 py-1.5 rounded-lg bg-[#7FEA35] text-black text-xs font-bold flex items-center gap-1.5">
-              <Shuffle className="w-3.5 h-3.5" /> New variation
+            <button
+              onClick={() => {
+                if (!isVariationActive) {
+                  setIsVariationActive(true);
+                } else {
+                  setVariantId((prev) => nextShotVariant(prev, shot.name || shot.id).id);
+                }
+              }}
+              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
+                isVariationActive
+                  ? 'bg-[#7FEA35] text-black font-bold shadow-sm'
+                  : 'bg-[#111315] border border-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D]'
+              }`}
+            >
+              <Shuffle className="w-3.5 h-3.5" />
+              {isVariationActive ? `Variation ${((variantId % 3) + 3) % 3 + 1} of 3` : 'Enable Variations'}
+            </button>
+          </div>
+
+          <div className="flex items-center gap-2">
+            <span className="text-[11px] text-[#A5A9AD] font-mono">
+              {!isVariationActive
+                ? `Authored ${shot.name} textbook technique`
+                : `Natural human spread · Variation ${((variantId % 3) + 3) % 3 + 1} of 3`}
+            </span>
+            <button
+              onClick={() => setReplayToken((n) => n + 1)}
+              className="px-3 py-1.5 rounded-lg border border-[#303438] bg-[#111315] text-[#F5F5F5] text-xs font-semibold flex items-center gap-1.5 hover:bg-[#181B1D] cursor-pointer"
+            >
+              <RotateCcw className="w-3.5 h-3.5" /> Replay
             </button>
           </div>
         </div>
@@ -321,7 +360,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             shotName={shot.name}
             variant={animationVariant}
             replayToken={replayToken}
-            tempoScale={animationVariant.tempo}
+            tempoScale={animationVariant ? animationVariant.tempo : 1.0}
             height={390}
             showTrail={true}
             showControls={true}
@@ -339,6 +378,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             initialPhaseIndex={activePhaseIndex}
             onPhaseChange={(idx) => setActivePhaseIndex(idx)}
             autoPlay={true}
+            showControls={false}
           />
         ) : (
           <div className="space-y-3">

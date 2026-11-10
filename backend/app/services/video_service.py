@@ -507,7 +507,14 @@ class VideoService:
 
             # Auto-detect uses the recognized label for its reference lookup. Manual
             # selection remains the reference choice when the user chose a shot.
-            active_shot = predicted_shot if auto_detect_requested else shot_type
+            if auto_detect_requested:
+                if predicted_shot in ("No clear shot detected", "Uncertain", "Unrecognised Shot"):
+                    cands = classification_result.get("top_candidates", [])
+                    active_shot = cands[0].get("shot_name", "Cover Drive") if cands else "Cover Drive"
+                else:
+                    active_shot = predicted_shot
+            else:
+                active_shot = shot_type
 
             # Headline discrepancy notice if detected shot differs from selected shot
             shot_mismatch_warning = None
