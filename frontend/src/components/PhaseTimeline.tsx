@@ -1,5 +1,6 @@
 import React from 'react';
 import { PhaseSegment } from '../types/cricket';
+import { Zap } from 'lucide-react';
 
 interface PhaseTimelineProps {
   phases: PhaseSegment[];
@@ -9,11 +10,23 @@ interface PhaseTimelineProps {
 }
 
 const PHASE_COLORS: Record<string, { bg: string; border: string; text: string; badge: string }> = {
+  'Stance': {
+    bg: 'bg-slate-700/60',
+    border: 'border-slate-500',
+    text: 'text-slate-300',
+    badge: 'bg-slate-800 text-slate-300 border-slate-600',
+  },
   'Stance / Setup': {
     bg: 'bg-slate-700/60',
     border: 'border-slate-500',
     text: 'text-slate-300',
     badge: 'bg-slate-800 text-slate-300 border-slate-600',
+  },
+  'Backlift': {
+    bg: 'bg-indigo-900/60',
+    border: 'border-indigo-500',
+    text: 'text-indigo-300',
+    badge: 'bg-indigo-950 text-indigo-300 border-indigo-700',
   },
   'Backswing / Preparation': {
     bg: 'bg-indigo-900/60',
@@ -21,11 +34,23 @@ const PHASE_COLORS: Record<string, { bg: string; border: string; text: string; b
     text: 'text-indigo-300',
     badge: 'bg-indigo-950 text-indigo-300 border-indigo-700',
   },
+  'Stride': {
+    bg: 'bg-blue-900/60',
+    border: 'border-blue-500',
+    text: 'text-blue-300',
+    badge: 'bg-blue-950 text-blue-300 border-blue-700',
+  },
   'Stride / Weight Transfer': {
     bg: 'bg-blue-900/60',
     border: 'border-blue-500',
     text: 'text-blue-300',
     badge: 'bg-blue-950 text-blue-300 border-blue-700',
+  },
+  'Downswing': {
+    bg: 'bg-cyan-900/60',
+    border: 'border-cyan-500',
+    text: 'text-cyan-300',
+    badge: 'bg-cyan-950 text-cyan-300 border-cyan-700',
   },
   'Downswing / Execution': {
     bg: 'bg-cyan-900/60',
@@ -33,10 +58,22 @@ const PHASE_COLORS: Record<string, { bg: string; border: string; text: string; b
     text: 'text-cyan-300',
     badge: 'bg-cyan-950 text-cyan-300 border-cyan-700',
   },
-  'Impact / Contact Window': {
-    bg: 'bg-amber-600/70',
+  'Impact': {
+    bg: 'bg-amber-600/75',
     border: 'border-amber-400',
-    text: 'text-amber-200',
+    text: 'text-amber-100 font-bold',
+    badge: 'bg-amber-950 text-amber-300 border-amber-600',
+  },
+  'Impact window': {
+    bg: 'bg-amber-600/75',
+    border: 'border-amber-400',
+    text: 'text-amber-100 font-bold',
+    badge: 'bg-amber-950 text-amber-300 border-amber-600',
+  },
+  'Impact / Contact Window': {
+    bg: 'bg-amber-600/75',
+    border: 'border-amber-400',
+    text: 'text-amber-100 font-bold',
     badge: 'bg-amber-950 text-amber-300 border-amber-600',
   },
   'Follow-through': {
@@ -88,23 +125,28 @@ export const PhaseTimeline: React.FC<PhaseTimelineProps> = ({
         {phases.map((seg, idx) => {
           const segDuration = Math.max(1, seg.end_frame - seg.start_frame + 1);
           const widthPct = (segDuration / totalFrames) * 100;
+          const isImpact = seg.phase_name.toLowerCase().includes('impact') || seg.phase_name.toLowerCase().includes('contact');
+          const isCurrent = currentFrame >= seg.start_frame && currentFrame <= seg.end_frame;
           const styling = PHASE_COLORS[seg.phase_name] || {
-            bg: 'bg-navy-800',
-            border: 'border-slate-600',
-            text: 'text-slate-300',
-            badge: 'bg-slate-800',
+            bg: isImpact ? 'bg-amber-600/75' : 'bg-navy-800',
+            border: isImpact ? 'border-amber-400' : 'border-slate-600',
+            text: isImpact ? 'text-amber-100 font-bold' : 'text-slate-300',
+            badge: isImpact ? 'bg-amber-950 text-amber-300 border-amber-600' : 'bg-slate-800',
           };
 
           return (
             <button
               key={idx}
-              onClick={() => onSelectFrame && onSelectFrame(seg.key_frame)}
+              onClick={() => onSelectFrame && onSelectFrame(seg.key_frame ?? seg.start_frame)}
               style={{ width: `${widthPct}%` }}
               title={`${seg.phase_name} (${seg.start_sec}s - ${seg.end_sec}s | Conf: ${(seg.confidence * 100).toFixed(0)}%)`}
-              className={`h-full ${styling.bg} border-r border-navy-900/80 relative group flex items-center justify-center px-1 text-center transition-all hover:brightness-125 focus:outline-none`}
+              className={`h-full ${styling.bg} border-r border-navy-900/80 relative group flex items-center justify-center px-1 text-center transition-all hover:brightness-125 focus:outline-none ${
+                isCurrent ? 'ring-2 ring-inset ring-white/60 shadow-lg' : ''
+              }`}
             >
-              <span className={`text-[10px] font-medium font-sans truncate ${styling.text}`}>
-                {seg.phase_name.split('/')[0].trim()}
+              <span className={`text-[10px] font-medium font-sans truncate flex items-center space-x-0.5 ${styling.text}`}>
+                {isImpact && <Zap className="w-2.5 h-2.5 text-amber-300 fill-amber-300 shrink-0" />}
+                <span>{seg.phase_name.split('/')[0].trim()}</span>
               </span>
             </button>
           );
@@ -122,18 +164,20 @@ export const PhaseTimeline: React.FC<PhaseTimelineProps> = ({
       {/* Phase Legend Pills */}
       <div className="flex flex-wrap gap-1.5 pt-1">
         {phases.map((p, idx) => {
+          const isImpact = p.phase_name.toLowerCase().includes('impact') || p.phase_name.toLowerCase().includes('contact');
           const styling = PHASE_COLORS[p.phase_name] || {
-            badge: 'bg-slate-800 text-slate-300 border-slate-700',
+            badge: isImpact ? 'bg-amber-950 text-amber-300 border-amber-600' : 'bg-slate-800 text-slate-300 border-slate-700',
           };
           const isCurrent = currentFrame >= p.start_frame && currentFrame <= p.end_frame;
           return (
             <button
               key={idx}
-              onClick={() => onSelectFrame && onSelectFrame(p.key_frame)}
-              className={`text-[11px] px-2 py-1 rounded-md border font-mono transition-all flex items-center space-x-1.5 ${
+              onClick={() => onSelectFrame && onSelectFrame(p.key_frame ?? p.start_frame)}
+              className={`text-[11px] px-2 py-1 rounded-md border font-mono transition-all flex items-center space-x-1.5 cursor-pointer ${
                 styling.badge
               } ${isCurrent ? 'ring-2 ring-white/70 font-semibold' : 'opacity-85 hover:opacity-100'}`}
             >
+              {isImpact && <Zap className="w-3 h-3 text-amber-400 fill-amber-400 shrink-0" />}
               <span>{p.phase_name}</span>
               <span className="opacity-60 text-[10px]">({p.start_sec}s)</span>
             </button>

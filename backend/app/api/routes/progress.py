@@ -8,7 +8,7 @@ from fastapi import APIRouter, Query, HTTPException
 from typing import Dict, Any, List, Optional
 from backend.app.services.progress_service import progress_service
 
-router = APIRouter(prefix="/api/progress", tags=["Progress & History"])
+router = APIRouter(prefix="/progress", tags=["Progress & History"])
 
 
 @router.get("/summary", summary="Get overall progress summary across all shot types")

@@ -1,0 +1,173 @@
+# CricketIQ — Hindi / Hinglish Coaching Vocabulary & Feedback Templates
+# Spoken in natural, friendly coaching-academy Hindi / Hinglish.
+# Note: "needs review by a native speaker"
+
+version: "1.0"
+language: "hi"
+status: "needs review by a native speaker"
+
+body_parts:
+  lead_knee: "aage wala ghutna"
+  rear_knee: "peeche wala ghutna"
+  lead_elbow: "aage wali kohni"
+  rear_elbow: "peeche wali kohni"
+  torso_lean: "upper body ka jhukav"
+  head_position: "sar ki position"
+  stance_width: "aage ka kadam"
+  lead_foot: "aage ka pair"
+  rear_foot: "peeche ka pair"
+  hands: "haath"
+  bat: "balla"
+
+timing_phases:
+  stance: "stance ke dauran"
+  backlift: "bat uthate waqt"
+  stride: "aage kadam nikalte waqt"
+  downswing: "bat neeche aate waqt"
+  impact: "ball connect hone ke time"
+  follow_through: "shot finish karte waqt"
+  recovery: "wapas ready hote waqt"
+
+severity_levels:
+  high: "Pehle yeh theek karo"
+  medium: "Sudhaar zaroori hai"
+  low: "Chhoti cheez"
+
+confidence_levels:
+  very_sure: "Poora yakeen hai"
+  fairly_sure: "Kafi hadd tak pakka"
+  not_sure: "Pakka nahi keh sakte"
+  cant_tell: "Samajh nahi aaya"
+
+technique_score_labels:
+  excellent: "Lajawaab"
+  good: "Badhiya"
+  getting_there: "Seekh rahe ho"
+  needs_work: "Mehnat ki zaroorat"
+
+metrics:
+  lead_knee_angle:
+    plain_name: "aage ke ghutne ka bend"
+    technical_name: "lead_knee_angle"
+    body_part: "lead_knee"
+    too_high:
+      relative_term: "zyada seedha raha"
+      title: "Aage ka ghutna zyada seedha tha"
+      why: "Ghutna seedha hone se balance bigadta hai aur ball hawa mein jaane ka risk rehta hai."
+      feel_cue: "Aage badhte waqt aage wale ghutne ko halka sa bend karo."
+      feel_cue_sweep: "Apna wazan neeche laao taaki peeche ka ghutna ghaas ko chhue."
+      drill_name: "Step-aur-freeze"
+      drill_steps: "Aage kadam nikalo aur do second ke liye ruko. Check karo ghutna jhooka ho. 10 baar karo."
+    too_low:
+      relative_term: "zyada jhuk gaya"
+      title: "Aage ka ghutna zyada jhuk gaya"
+      why: "Zyada neeche girne se balance ruk jaata hai aur ball tak poora reach nahi milta."
+      feel_cue: "Ghutne ko bouncy aur ready rakho, poora zameen pe mat giraao."
+      drill_name: "Wall-support lunges"
+      drill_steps: "Deewar pe haath rakh ke aage kadam nikalo. Ghutna control mein rakho. 10 baar repeat karo."
+
+  lead_elbow_angle:
+    plain_name: "aage ki kohni ki height"
+    technical_name: "lead_elbow_angle"
+    body_part: "lead_elbow"
+    too_low:
+      relative_term: "zyada neeche gir gayi"
+      title: "Aage wali kohni neeche gir gayi"
+      why: "Kohni neeche aane se bat ghoom jaata hai aur slip mein edge lag sakta hai."
+      feel_cue: "Shot khelte waqt aage wali kohni ko seedha bowler ki taraf point karo."
+      drill_name: "High-elbow shadow drives"
+      drill_steps: "Thodi ke neeche tennis ball dabao. Drive maarte waqt ball nahi girni chahiye. 10 reps."
+    too_high:
+      relative_term: "zyada stiff ho gayi"
+      title: "Aage ka haath zyada akad gaya"
+      why: "Stiff arms se ball theek se time nahi hoti aur power kam ho jaati hai."
+      feel_cue: "Aage ke haath ko aaraam se rakho aur bat ko naturally swing hone do."
+      drill_name: "Ek haath ka swing"
+      drill_steps: "Sirf top hand se bat swing karo. Smooth pendulum feel karo. 10 baar karo."
+
+  torso_lean:
+    plain_name: "upper body ka jhukav"
+    technical_name: "torso_lean"
+    body_part: "torso_lean"
+    too_high:
+      relative_term: "zyada aage jhuk gaya"
+      title: "Upper body aage ki taraf zyada gir gayi"
+      why: "Aage girne se aap crease pe ladkhada jaate ho aur lbw hone ka khatra rehta hai."
+      feel_cue: "Chhati ko seedha aur sar ko stable rakho, pairon ko aage badhao."
+      drill_name: "Tall-spine shadow balance"
+      drill_steps: "Aaine ke saamne shot khelo. Finish hold karke dekho sar seedha ho. 10 reps."
+    too_low:
+      relative_term: "zyada seedha khada raha"
+      title: "Body zyada seedhi khadi rahi"
+      why: "Zyada seedhe rehne se wazan peeche reh jaata hai aur shot mein power nahi aati."
+      feel_cue: "Kadam nikalte waqt upper body ko halka sa aage drive ki taraf jhukaao."
+      drill_name: "Step-and-lean shadow drill"
+      drill_steps: "Shot mein kadam aage badhao aur weight aage transfer karo. 10 reps."
+
+  head_over_front_knee_offset:
+    plain_name: "sar ki position"
+    technical_name: "head_over_front_knee_offset"
+    body_part: "head_position"
+    too_high:
+      relative_term: "line se bahar gir gaya"
+      title: "Sar ball ki line se bahar gir gaya"
+      why: "Sar tedha hone se aankhein jhuk jaati hain aur ball ki line samajh nahi aati."
+      feel_cue: "Apni naak ko seedha ball ki line mein aage le jao."
+      drill_name: "Target-ball drop drill"
+      drill_steps: "Partner se tennis ball drop karao aur sar ke neeche catch karo. 10 baar."
+    too_low:
+      relative_term: "peeche reh gaya"
+      title: "Sar ball se peeche reh gaya"
+      why: "Sar peeche rehne se sirf haath pahunchte hain aur control kho jaata hai."
+      feel_cue: "Shot maarte waqt apni thodi ko aage wale ghutne ke upar rakho."
+      drill_name: "Chin-over-knee pause drill"
+      drill_steps: "Drive karke ruko aur dekho thodi aage ke ghutne ke upar hai ya nahi. 10 reps."
+
+  stance_width_ratio:
+    plain_name: "aage ka kadam"
+    technical_name: "stance_width_ratio"
+    body_part: "stance_width"
+    too_high:
+      relative_term: "zyada lamba kadam le liya"
+      title: "Aage ka kadam zyada lamba le liya"
+      why: "Lamba kadam lene se wazan aage phans jaata hai aur late adjust nahi kar paate."
+      feel_cue: "Kadam utna hi nikalo jisme balance bana rahe aur pair bouncy rahe."
+      drill_name: "Marker-cone stride drill"
+      drill_steps: "Do joote aage cone rakho aur wahan tak aaram se stride karo. 10 reps."
+    too_low:
+      relative_term: "kadam chhota reh gaya"
+      title: "Aage ka kadam chhota reh gaya"
+      why: "Chhota kadam lene se ball tak pahunchna mushkil hota hai aur dur se khelte ho."
+      feel_cue: "Ball ke pitch ki taraf positive intent ke saath poora pair nikalo."
+      drill_name: "Target-stride drives"
+      drill_steps: "Full length marker pe poora pair nikal ke drive khelo. 10 reps."
+
+strengths:
+  balanced_base:
+    title: "Solid aur balanced base"
+    sentence: "Aapka pairon ka base shot ke dauran ekdum mazboot tha."
+  head_steady:
+    title: "Ball par bilkul sthir sar"
+    sentence: "Contact tak aapka sar bilkul still aur ball par tha."
+  high_elbow:
+    title: "Shaandaar high front elbow"
+    sentence: "Aapki front elbow ne bat ko ekdum seedhe path par guide kiya."
+  knee_flex:
+    title: "Smooth front knee bend"
+    sentence: "Aage ka ghutna wazan absorb karne ke liye badiya bend hua."
+  rhythm:
+    title: "Badiya rhythmic swing"
+    sentence: "Aapka bat bina kisi jhatke ke smoothly aage badha."
+
+unmeasurable_notices:
+  camera_view_knee: "Is angle se hum aapke aage wale ghutne ko check nahi kar sake. Ghutne ki advice ke liye side-on film karein."
+  out_of_frame: "Hum aapke {body_part} ko check nahi kar sake kyunki woh video frame se bahar tha. Side se poori body capture karo."
+  low_light: "Roshni kam hone ki wajah se {body_part} saaf nahi dikha. Behtar light mein video banaayein."
+  motion_blur: "Tez movement ki wajah se {body_part} blur ho gaya. Achhi roshni mein film karein."
+  camera_angle: "Camera angle ke kaaran {body_part} ko theek se measure nahi kiya ja saka. Camera ko crease ke seedh mein rakhein."
+
+overall_verdicts:
+  excellent: "Lajawaab {shot_name}! Balance aur bat ka path bilkul textbook hai."
+  good: "Badhiya {shot_name}. Base mazboot hai. Bas {focus_body_part} sudhaaro, shot aur behtar hoga."
+  getting_there: "Aap {shot_name} seekh rahe ho. Agli 10 balls par {focus_body_part} par dhyan do."
+  needs_work: "{shot_name} par aur practice ki zaroorat hai. Pehle {focus_body_part} theek karo."

@@ -1,0 +1,177 @@
+# CricketIQ — Plain English Coaching Vocabulary & Feedback Templates
+# Spoken like an experienced, friendly cricket coach at the practice nets.
+# Rules: No biomechanics jargon (no flexion, torso, kinematic, DTW, tolerance).
+# Sentences are crisp, encouraging, and under 15 words on average.
+
+version: "1.0"
+language: "en"
+
+body_parts:
+  lead_knee: "front knee"
+  rear_knee: "back knee"
+  lead_elbow: "front elbow"
+  rear_elbow: "back elbow"
+  torso_lean: "upper body lean"
+  head_position: "head"
+  stance_width: "front step"
+  lead_foot: "front foot"
+  rear_foot: "back foot"
+  hands: "hands"
+  bat: "bat"
+
+timing_phases:
+  stance: "in your stance"
+  backlift: "as you lift the bat"
+  stride: "as you step forward"
+  downswing: "as the bat swings down"
+  impact: "at the moment of hitting the ball"
+  follow_through: "as you finish the stroke"
+  recovery: "as you reset"
+
+severity_levels:
+  high: "Fix this first"
+  medium: "Worth improving"
+  low: "Minor"
+
+confidence_levels:
+  very_sure: "Very sure"
+  fairly_sure: "Fairly sure"
+  not_sure: "Not very sure"
+  cant_tell: "Can't tell"
+
+technique_score_labels:
+  excellent: "Excellent"
+  good: "Good"
+  getting_there: "Getting there"
+  needs_work: "Needs work"
+
+metrics:
+  lead_knee_angle:
+    plain_name: "front knee bend"
+    technical_name: "lead_knee_angle"
+    body_part: "lead_knee"
+    too_high: # Stiff / straight
+      relative_term: "a bit too straight"
+      title: "Your front knee stayed too straight"
+      why: "A straight front leg makes you lose balance and hit the ball in the air."
+      feel_cue: "Bend your front knee slightly, as if sitting on a high stool, as you step."
+      feel_cue_sweep: "Sink your weight down low so your back knee brushes the grass."
+      drill_name: "Step-and-freeze"
+      drill_steps: "Take your front step and freeze for two seconds. Check your knee is bent over your laces. Do 10 reps."
+    too_low: # Over-bent / collapsed
+      relative_term: "bent too low"
+      title: "Your front knee bent too far"
+      why: "Dropping too low locks your hips and makes it harder to reach the ball."
+      feel_cue: "Keep a firm, bouncy front knee rather than sinking all the way down."
+      feel_cue_sweep: "Stay balanced over your front foot instead of tumbling forward."
+      drill_name: "Wall-support lunges"
+      drill_steps: "Rest one hand on a wall and lunge forward. Stop before your knee collapses past your toes. Repeat 10 times."
+
+  lead_elbow_angle:
+    plain_name: "front elbow height"
+    technical_name: "lead_elbow_angle"
+    body_part: "lead_elbow"
+    too_low: # Dropped elbow / chicken wing
+      relative_term: "dropped too low"
+      title: "Your front elbow dropped too low"
+      why: "A low elbow turns the bat face, risking an edge to the slips."
+      feel_cue: "Point your front elbow straight at the bowler as you swing down."
+      feel_cue_pull: "Keep both arms extended at chest height as you swivel."
+      drill_name: "High-elbow shadow drives"
+      drill_steps: "Hold a tennis ball under your front chin. Drive without dropping the ball, finishing with a high elbow. 10 reps."
+    too_high: # Stiff / locked reach
+      relative_term: "reaching too stiff"
+      title: "Your front arm reached too stiffly"
+      why: "Stiff arms take away your touch and make you mistime the ball."
+      feel_cue: "Keep your front arm relaxed and let the bat swing freely."
+      drill_name: "One-handed pendulum swings"
+      drill_steps: "Swing the bat with your top hand only. Feel the bat swing like a smooth pendulum. 10 reps."
+
+  torso_lean:
+    plain_name: "upper body lean"
+    technical_name: "torso_lean"
+    body_part: "torso_lean"
+    too_high: # Over-leaning
+      relative_term: "leaning too far forward"
+      title: "Your upper body tipped too far forward"
+      why: "Tipping forward pulls you off balance and makes you fall over your crease."
+      feel_cue: "Keep your chest tall and let your feet do the traveling."
+      feel_cue_defensive: "Stay compact with your eyes right on top of the bounce."
+      drill_name: "Tall-spine shadow balance"
+      drill_steps: "Set up by a mirror and play your shot. Hold your finish and make sure your head stays upright. 10 reps."
+    too_low: # Hanging back / too upright
+      relative_term: "standing too upright"
+      title: "Your upper body stayed too upright"
+      why: "Staying upright leaves your weight behind, robbing your shot of power."
+      feel_cue: "Lean your chest gently into the shot as you step."
+      feel_cue_pull: "Stand tall on your back foot and rotate smoothly through square leg."
+      drill_name: "Step-and-lean shadow drill"
+      drill_steps: "Step into your shot and rest your chest lightly against a soft pad. Feel your weight shift forward. 10 reps."
+
+  head_over_front_knee_offset:
+    plain_name: "head position"
+    technical_name: "head_over_front_knee_offset"
+    body_part: "head_position"
+    too_high: # Head falling away to off-side
+      relative_term: "falling outside the ball"
+      title: "Your head fell away from the ball"
+      why: "When your head falls sideways, your eyes tilt and you misjudge the line."
+      feel_cue: "Lead with your nose straight down the line of the ball."
+      drill_name: "Target-ball drop drill"
+      drill_steps: "Have a partner drop a tennis ball from shoulder height. Step and catch it under your eyes. 10 reps."
+    too_low: # Head hanging back
+      relative_term: "hanging too far back"
+      title: "Your head stayed too far back"
+      why: "Hanging back forces you to reach with your hands, losing control."
+      feel_cue: "Bring your chin right over your front knee as you strike."
+      drill_name: "Chin-over-knee pause drill"
+      drill_steps: "Step forward into a drive and freeze. Look down to confirm your chin covers your front knee. 10 reps."
+
+  stance_width_ratio:
+    plain_name: "front step width"
+    technical_name: "stance_width_ratio"
+    body_part: "stance_width"
+    too_high: # Over-stride
+      relative_term: "stepping too far"
+      title: "You took too big a front step"
+      why: "Over-stepping traps your weight on your front heel, so you cannot adjust."
+      feel_cue: "Take a comfortable step so your base stays bouncy and athletic."
+      drill_name: "Marker-cone stride drill"
+      drill_steps: "Place a cone two shoe-lengths in front. Step your front toe right up to the cone without overreaching. 10 reps."
+    too_low: # Under-stride
+      relative_term: "step too small"
+      title: "Your front step was too short"
+      why: "A short step leaves you reaching away from your body to hit the ball."
+      feel_cue: "Step firmly towards the pitch of the ball with positive intent."
+      drill_name: "Target-stride drives"
+      drill_steps: "Place a marker at driving length. Take a positive stride onto the marker and complete your stroke. 10 reps."
+
+strengths:
+  balanced_base:
+    title: "Strong, balanced base"
+    sentence: "Your feet gave you a rock-solid foundation through the shot."
+  head_steady:
+    title: "Still head on the ball"
+    sentence: "Your head stayed perfectly still right up to contact."
+  high_elbow:
+    title: "Crisp high front elbow"
+    sentence: "Your front elbow guided the bat down a clean, straight path."
+  knee_flex:
+    title: "Smooth front knee bend"
+    sentence: "Your front knee bent nicely to absorb your weight into the shot."
+  rhythm:
+    title: "Smooth, fluid swing"
+    sentence: "Your bat accelerated smoothly without any jerky movements."
+
+unmeasurable_notices:
+  camera_view_knee: "We couldn't check your front knee from this angle. For knee advice, film from side-on (square with the pitch)."
+  out_of_frame: "We couldn't check your {body_part} because it was out of frame. Film from the side with your whole body visible."
+  low_light: "The lighting was too dim to track your {body_part} accurately. Film in brighter light for a clear reading."
+  motion_blur: "Fast motion blurred your {body_part} at contact. Film in good natural light or at a higher shutter speed."
+  camera_angle: "Your camera angle makes it hard to measure {body_part} reliably. Place the camera square to your crease."
+
+overall_verdicts:
+  excellent: "Outstanding {shot_name}. Your balance and bat path are in great shape."
+  good: "Good {shot_name}. Your base is solid. Fix {focus_body_part} and the stroke will be even cleaner."
+  getting_there: "You are getting there with the {shot_name}. Focus on your {focus_body_part} for a big improvement."
+  needs_work: "Keep practicing the {shot_name}. Work on your {focus_body_part} first to build confidence."

@@ -15,6 +15,75 @@ body {
   -moz-osx-font-smoothing: grayscale;
 }
 
+/* Glass panel utility */
+.glass-panel {
+  background: rgba(17, 19, 21, 0.75);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.glass-panel-cyan {
+  background: rgba(11, 16, 22, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(0, 240, 255, 0.2);
+}
+
+.glass-panel-lime {
+  background: rgba(14, 22, 11, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  border: 1px solid rgba(127, 234, 53, 0.25);
+}
+
+/* Subtle glow effects */
+.glow-lime {
+  box-shadow: 0 0 24px -4px rgba(127, 234, 53, 0.35);
+}
+
+.glow-cyan {
+  box-shadow: 0 0 24px -4px rgba(0, 240, 255, 0.35);
+}
+
+.text-glow-lime {
+  text-shadow: 0 0 12px rgba(127, 234, 53, 0.5);
+}
+
+.text-glow-cyan {
+  text-shadow: 0 0 12px rgba(0, 240, 255, 0.5);
+}
+
+/* Fine broadcast scanlines texture */
+.bg-scanlines {
+  background-image: linear-gradient(
+    rgba(255, 255, 255, 0.015) 1px,
+    transparent 1px
+  );
+  background-size: 100% 4px;
+}
+
+/* Smooth scroll styling for Lenis */
+html.lenis, html.lenis body {
+  height: auto;
+}
+
+.lenis.lenis-smooth {
+  scroll-behavior: auto !important;
+}
+
+.lenis.lenis-smooth [data-lenis-prevent] {
+  overscroll-behavior: contain;
+}
+
+.lenis.lenis-stopped {
+  overflow: hidden;
+}
+
+.lenis.lenis-smooth iframe {
+  pointer-events: none;
+}
+
 /* Custom scrollbar for dark theme */
 ::-webkit-scrollbar {
   width: 7px;

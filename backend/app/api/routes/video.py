@@ -52,7 +52,9 @@ async def inspect_strikers_endpoint(
                 bbox=c["bbox"],
                 is_default=c["is_default"],
                 role=c["role"],
-                wrist_motion_score=c["wrist_motion_score"]
+                wrist_motion_score=c["wrist_motion_score"],
+                confidence=c.get("confidence"),
+                evidence=c.get("evidence")
             )
             for c in inspect_data.get("candidates", [])
         ]
@@ -63,7 +65,8 @@ async def inspect_strikers_endpoint(
             total_persons=inspect_data.get("total_persons", len(candidates)),
             frame_width=inspect_data.get("frame_width", 640),
             frame_height=inspect_data.get("frame_height", 480),
-            frame_0_data_url=frame0_b64
+            frame_0_data_url=frame0_b64,
+            needs_confirmation=inspect_data.get("needs_confirmation", False)
         )
     finally:
         temp_path.unlink(missing_ok=True)

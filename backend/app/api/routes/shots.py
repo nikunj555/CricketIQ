@@ -12,13 +12,14 @@ router = APIRouter(prefix="/shots", tags=["Shot Library"])
 
 def _enrich_shot_data(s: dict) -> dict:
     shot_copy = dict(s)
-    ref = reference_service.get_shot_reference(shot_copy.get("name", ""))
-    if ref:
-        shot_copy["analysis_status"] = ref.get("analysis_status", "coming_soon")
-        shot_copy["status_message"] = ref.get("status_message")
+    tier = reference_service.get_shot_support_tier(shot_copy.get("name", ""))
+    shot_copy["support_tier"] = tier
+    if tier == "supported":
+        shot_copy["analysis_status"] = "available"
+        shot_copy["status_message"] = f"Empirically validated reference active for {shot_copy.get('name')}."
     else:
-        shot_copy["analysis_status"] = "coming_soon"
-        shot_copy["status_message"] = "Analysis coming soon. Detailed biomechanical tolerances currently available for Cover Drive, Straight Drive, Pull Shot, Forward Defensive, and Sweep."
+        shot_copy["analysis_status"] = "preview_only"
+        shot_copy["status_message"] = "Preview only: analysis coming soon"
     return shot_copy
 
 @router.get("", response_model=ShotListResponse)

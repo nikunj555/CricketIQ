@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import {
   Play,
   Pause,
@@ -15,11 +15,17 @@ import {
   Info,
   Layers,
   Sparkles,
-  Compass
+  Compass,
+  Crosshair,
+  Dumbbell,
+  Shuffle
 } from 'lucide-react';
 import { CricketShot, ReferenceDetail } from '../types/cricket';
 import { api } from '../services/api';
 import { RealisticBatterVisualizer } from './RealisticBatterVisualizer';
+import { Batter3DCanvas } from './3d/Batter3DCanvas';
+import { getShotAnimation, ShotAnimationDefinition } from '../data/shotAnimations';
+import { createShotVariant, nextShotVariant } from '../data/shotVariants';
 
 interface ShotPreviewModalProps {
   shot: CricketShot;
@@ -27,6 +33,8 @@ interface ShotPreviewModalProps {
   onStartPractice: (shot: CricketShot) => void;
   onUploadAttempt: (shot: CricketShot) => void;
 }
+
+const PHASE_KEYS = ['stance', 'backlift', 'stride', 'downswing', 'impact', 'follow_through', 'recovery'];
 
 export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   shot,
@@ -38,15 +46,28 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [previewMode, setPreviewMode] = useState<'avatar' | 'video'>('avatar');
+  const [previewMode, setPreviewMode] = useState<'blueprint' | '3d' | 'video'>('blueprint');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.75);
-  const [activePhaseIndex, setActivePhaseIndex] = useState<number>(4); // Default to Impact window
+  const [activePhaseIndex, setActivePhaseIndex] = useState<number>(0); // Default to Stance
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
+  const [variantId, setVariantId] = useState(0);
+  const [replayToken, setReplayToken] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
+
+  // Authoritative shot animation from shotAnimations.ts
+  const shotAnimation: ShotAnimationDefinition | null = useMemo(() => {
+    return getShotAnimation(shot.name || shot.id);
+  }, [shot.id, shot.name]);
+  const animationVariant = useMemo(() => createShotVariant(variantId, shot.name || shot.id), [variantId, shot.id, shot.name]);
+
+  useEffect(() => {
+    setVariantId((previous) => nextShotVariant(previous, shot.name || shot.id).id);
+    setReplayToken(0);
+  }, [shot.id]);
 
   useEffect(() => {
     loadReference();
@@ -60,7 +81,6 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
       setRefDetail(data);
     } catch (err: any) {
       console.warn('Reference load notice:', err.message);
-      // Fallback from shot catalogue data
       if (shot.reference_video_url) {
         setRefDetail({
           id: shot.reference_id || 'ref_default',
@@ -82,10 +102,10 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             'Lead knee flexes to absorb momentum.',
             'Hold the finish to verify balance.'
           ],
-          common_mistakes: [
-            'Reaching with stiff hands without moving the feet.',
-            'Loss of balance through point of contact.',
-            'Taking eyes off the ball prematurely.'
+          common_mistakes: shotAnimation?.commonMistakes || [
+            'Playing away from the body without full commitment to footwork',
+            'Closing or opening the bat face prematurely through impact',
+            'Collapsing the front knee or losing balance during downswing'
           ],
           phases: [
             { phase_name: 'Stance', frame_window: '0% - 20%', description: 'Initial balanced ready position.', lead_knee_target: '165° - 170°', key_cue: 'Relaxed grip, soft knees' },
@@ -161,17 +181,22 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
     ? api.getVideoUrl(shot.reference_video_url)
     : null;
 
-  const phases = refDetail?.phases?.length ? refDetail.phases : [
-    { phase_name: 'Stance', frame_window: '0% - 20%', description: 'Initial balanced ready position awaiting delivery.', lead_knee_target: '165° - 170°', key_cue: 'Relaxed grip, soft knees' },
-    { phase_name: 'Backlift', frame_window: '20% - 35%', description: 'Backswing initiated toward slips.', lead_knee_target: '160° - 165°', key_cue: 'Top hand directs bat face' },
-    { phase_name: 'Stride', frame_window: '35% - 50%', description: 'Decisive footwork establishing striking base.', lead_knee_target: '135° - 150°', key_cue: 'Head leads stride' },
-    { phase_name: 'Downswing', frame_window: '50% - 65%', description: 'Bat accelerates smoothly into swing arc.', lead_knee_target: '125° - 135°', key_cue: 'Lead elbow leads path' },
-    { phase_name: 'Impact window', frame_window: '65% - 74%', description: 'Bat strikes ball under eye line.', lead_knee_target: '118° - 128°', key_cue: 'Eyes locked on contact' },
-    { phase_name: 'Follow-through', frame_window: '74% - 88%', description: 'Smooth deceleration through line.', lead_knee_target: '130° - 145°', key_cue: 'Hold pose for balance' },
-    { phase_name: 'Recovery', frame_window: '88% - 100%', description: 'Controlled reset toward neutral.', lead_knee_target: '160° - 168°', key_cue: 'Push back into stance' },
-  ];
+  const phases = useMemo(() => {
+    return PHASE_KEYS.map((pk) => {
+      const kf = shotAnimation?.phases?.[pk];
+      return {
+        phase_name: kf?.label || pk.replace('_', ' ').replace(/\b\w/g, (c) => c.toUpperCase()),
+        frame_window: pk === 'stance' ? '0% - 15%' : pk === 'backlift' ? '15% - 35%' : pk === 'stride' ? '35% - 50%' : pk === 'downswing' ? '50% - 65%' : pk === 'impact' ? '65% - 75%' : pk === 'follow_through' ? '75% - 90%' : '90% - 100%',
+        description: kf?.cue || `Textbook biomechanics for ${shot.name}`,
+        lead_knee_target: `${kf?.leadLeg?.kneeAngleDeg || 125}°`,
+        key_cue: kf?.cue || 'Hold shape and balance'
+      };
+    });
+  }, [shotAnimation, shot.name]);
 
-  const currentPhase = phases[activePhaseIndex] || phases[4];
+  const currentPhase = phases[activePhaseIndex] || phases[0];
+  const activePhaseKey = PHASE_KEYS[activePhaseIndex] || 'stance';
+  const activeKeyframeData = shotAnimation?.phases?.[activePhaseKey];
 
   return (
     <div className="fixed inset-0 z-50 bg-[#050505]/85 backdrop-blur-md flex items-center justify-center p-3 sm:p-5 animate-in fade-in duration-150 overflow-y-auto">
@@ -188,7 +213,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
               </span>
               <span className="text-xs font-mono px-2.5 py-0.5 rounded-full bg-[#111315] text-[#7FEA35] border border-[#303438] flex items-center space-x-1">
                 <ShieldCheck className="w-3.5 h-3.5 text-[#7FEA35]" />
-                <span>Verified Reference</span>
+                <span>Biomechanical reference: authored baseline (tunable)</span>
               </span>
             </div>
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#F5F5F5] tracking-tight">
@@ -212,19 +237,50 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </button>
         </div>
 
-        {/* Preview Mode Selector: Realistic Avatar vs Authentic Video */}
-        <div className="flex items-center justify-between border-b border-[#303438] pb-3">
+        {/* Ball Trajectory & Shot Profile Info Banner */}
+        <div className="p-3.5 rounded-xl bg-[#111315] border border-[#303438] flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex items-center space-x-2.5">
+            <span className="w-2.5 h-2.5 rounded-full bg-rose-500 shrink-0 animate-ping" />
+            <Crosshair className="w-4 h-4 text-rose-400 shrink-0" />
+            <div>
+              <span className="text-[#A5A9AD]">Delivery Line & Length: </span>
+              <strong className="text-[#F5F5F5]">
+                {shotAnimation ? `${shotAnimation.ballTrajectory.line} • ${shotAnimation.ballTrajectory.length}` : 'Good Length • Off Stump'}
+              </strong>
+            </div>
+          </div>
+          <div className="flex items-center space-x-2">
+            <span className="text-[#A5A9AD]">Bat Swing Plane:</span>
+            <span className="font-mono text-[#7FEA35] font-semibold uppercase px-2 py-0.5 rounded bg-[#181B1D] border border-[#303438]">
+              {shotAnimation?.swingPlane ? shotAnimation.swingPlane.replace('_', ' ') : 'Vertical'}
+            </span>
+          </div>
+        </div>
+
+        {/* Preview Mode Selector: 3D Kinematics vs 2D Blueprint vs Authentic Video */}
+        <div className="flex flex-wrap items-center justify-between border-b border-[#303438] pb-3 gap-2">
           <div className="flex items-center space-x-2">
             <button
-              onClick={() => setPreviewMode('avatar')}
+              onClick={() => setPreviewMode('3d')}
               className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                previewMode === 'avatar'
+                previewMode === '3d'
                   ? 'bg-[#7FEA35] text-black shadow-md'
                   : 'bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] border border-[#303438]'
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>Realistic Batting Avatar</span>
+              <span>3D Orbital Kinematics</span>
+            </button>
+            <button
+              onClick={() => setPreviewMode('blueprint')}
+              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
+                previewMode === 'blueprint'
+                  ? 'bg-[#00f0ff] text-black shadow-md'
+                  : 'bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] border border-[#303438]'
+              }`}
+            >
+              <Layers className="w-3.5 h-3.5" />
+              <span>2D Kinematic Blueprint</span>
             </button>
             <button
               onClick={() => setPreviewMode('video')}
@@ -238,15 +294,47 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
               <span>Authentic Video Footage</span>
             </button>
           </div>
-          <span className="text-[11px] font-mono text-[#A5A9AD] hidden sm:inline">
-            {previewMode === 'avatar' ? 'Biomechanical skeletal simulation with cricket gear' : 'Verified masterclass video footage'}
+          <span className="text-[11px] font-mono text-[#A5A9AD] hidden md:inline">
+            {previewMode === '3d'
+              ? 'WebGL forward kinematics on 3D pitch'
+              : previewMode === 'blueprint'
+              ? 'Multi-view 2D biomechanical blueprint'
+              : 'Masterclass benchmark footage'}
           </span>
         </div>
 
+        <div className="flex items-center justify-between gap-3 -mt-3">
+          <span className="text-[11px] text-[#A5A9AD] font-mono">Variation {variantId + 1} of 3 · same authored {shot.name} movement</span>
+          <div className="flex gap-2">
+            <button onClick={() => setReplayToken((n) => n + 1)} className="px-3 py-1.5 rounded-lg border border-[#303438] bg-[#111315] text-[#F5F5F5] text-xs font-semibold flex items-center gap-1.5">
+              <RotateCcw className="w-3.5 h-3.5" /> Replay same
+            </button>
+            <button onClick={() => setVariantId(nextShotVariant(variantId, shot.name || shot.id).id)} className="px-3 py-1.5 rounded-lg bg-[#7FEA35] text-black text-xs font-bold flex items-center gap-1.5">
+              <Shuffle className="w-3.5 h-3.5" /> New variation
+            </button>
+          </div>
+        </div>
+
         {/* Main Visualizer / Video Player Section */}
-        {previewMode === 'avatar' ? (
-          <RealisticBatterVisualizer
+        {previewMode === '3d' ? (
+          <Batter3DCanvas
             shotName={shot.name}
+            variant={animationVariant}
+            replayToken={replayToken}
+            tempoScale={animationVariant.tempo}
+            height={390}
+            showTrail={true}
+            showControls={true}
+            showPhaseScrubber={true}
+            showCameraPresets={true}
+            autoOrbitDefault={false}
+          />
+        ) : previewMode === 'blueprint' ? (
+          <RealisticBatterVisualizer
+            shotId={shot.id}
+            shotName={shot.name}
+            variant={animationVariant}
+            replayToken={replayToken}
             category={shot.category}
             initialPhaseIndex={activePhaseIndex}
             onPhaseChange={(idx) => setActivePhaseIndex(idx)}
@@ -272,7 +360,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
                   <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
                   <h4 className="text-sm font-bold text-[#F5F5F5]">No Authentic Footage Available</h4>
                   <p className="text-xs text-[#A5A9AD] max-w-md">
-                    CricketIQ strictly refuses to show generic substitute videos for unrelated shots. You can upload an authorized reference video below.
+                    CricketIQ refuses to show generic substitute videos for unrelated shots. You can upload an authorized reference video below.
                   </p>
                   <button
                     onClick={() => setShowUploadModal(true)}
@@ -368,7 +456,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
 
           {/* Active Phase Deep Dive Card */}
-          <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-2">
+          <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-3">
             <div className="flex items-center justify-between">
               <div className="flex items-center space-x-2">
                 <span className="text-xs font-bold text-[#7FEA35] uppercase font-mono">
@@ -387,8 +475,25 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             </p>
             <div className="text-[11px] text-[#A5A9AD] flex items-center space-x-1.5">
               <Sparkles className="w-3.5 h-3.5 text-[#7FEA35]" />
-              <span><strong>Key Coaching Cue:</strong> {currentPhase.key_cue}</span>
+              <span><strong>Key Coaching Cue: </strong>{activeKeyframeData?.cue || currentPhase.key_cue}</span>
             </div>
+
+            {/* Phase Checkpoints */}
+            {activeKeyframeData?.techniquePoints && (
+              <div className="pt-2 border-t border-[#303438]/50 space-y-1.5">
+                <span className="text-[10px] font-mono font-bold text-[#7FEA35] uppercase tracking-wider">
+                  Phase Checkpoints:
+                </span>
+                <ul className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 text-xs text-[#A5A9AD]">
+                  {activeKeyframeData.techniquePoints.map((pt, i) => (
+                    <li key={i} className="flex items-start space-x-1.5">
+                      <span className="text-[#7FEA35] font-bold">•</span>
+                      <span>{pt}</span>
+                    </li>
+                  ))}
+                </ul>
+              </div>
+            )}
           </div>
         </div>
 
@@ -422,42 +527,56 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
         )}
 
-        {/* Technique Points & Common Mistakes */}
-        {refDetail && (
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-2 border-t border-[#303438]">
-            {/* Checklist */}
-            <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-2.5">
-              <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
-                <CheckCircle2 className="w-4 h-4 text-[#7FEA35]" />
-                <span>Key Technical Checkpoints</span>
-              </h4>
-              <ul className="space-y-1.5 text-xs text-[#A5A9AD]">
-                {refDetail.technique_points?.map((pt, i) => (
-                  <li key={i} className="flex items-start space-x-2">
-                    <span className="text-[#7FEA35] font-bold">•</span>
-                    <span>{pt}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
-
-            {/* Common Mistakes */}
-            <div className="p-4 rounded-xl bg-[#111315] border border-rose-900/40 space-y-2.5">
-              <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
-                <AlertTriangle className="w-4 h-4 text-rose-400" />
-                <span>Common Mistakes to Avoid</span>
-              </h4>
-              <ul className="space-y-1.5 text-xs text-[#A5A9AD]">
-                {refDetail.common_mistakes?.map((m, i) => (
-                  <li key={i} className="flex items-start space-x-2">
-                    <span className="text-rose-400 font-bold">•</span>
-                    <span>{m}</span>
-                  </li>
-                ))}
-              </ul>
-            </div>
+        {/* Technique Points, Common Mistakes & Practice Drills */}
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-[#303438]">
+          {/* Key Technique Points */}
+          <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-2.5">
+            <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
+              <CheckCircle2 className="w-4 h-4 text-[#7FEA35]" />
+              <span>Key Checkpoints</span>
+            </h4>
+            <ul className="space-y-1.5 text-xs text-[#A5A9AD]">
+              {(refDetail?.technique_points?.length ? refDetail.technique_points : activeKeyframeData?.techniquePoints || []).map((pt, i) => (
+                <li key={i} className="flex items-start space-x-2">
+                  <span className="text-[#7FEA35] font-bold">•</span>
+                  <span>{pt}</span>
+                </li>
+              ))}
+            </ul>
           </div>
-        )}
+
+          {/* Common Mistakes */}
+          <div className="p-4 rounded-xl bg-[#111315] border border-rose-900/40 space-y-2.5">
+            <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-rose-400" />
+              <span>Common Mistakes</span>
+            </h4>
+            <ul className="space-y-1.5 text-xs text-[#A5A9AD]">
+              {(shotAnimation?.commonMistakes || []).map((m, i) => (
+                <li key={i} className="flex items-start space-x-2">
+                  <span className="text-rose-400 font-bold">•</span>
+                  <span>{m}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+
+          {/* Recommended Technical Drills */}
+          <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-2.5">
+            <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
+              <Dumbbell className="w-4 h-4 text-[#38BDF8]" />
+              <span>Recommended Drills</span>
+            </h4>
+            <ul className="space-y-1.5 text-xs text-[#A5A9AD]">
+              {(shotAnimation?.drills || []).map((drill, i) => (
+                <li key={i} className="flex items-start space-x-2">
+                  <span className="text-[#38BDF8] font-bold">{i + 1}.</span>
+                  <span>{drill}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        </div>
 
         {/* Modal Actions */}
         <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#303438]">
@@ -544,4 +663,3 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
     </div>
   );
 };
-

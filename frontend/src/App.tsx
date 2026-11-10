@@ -1,26 +1,52 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, Suspense, lazy } from 'react';
 import { Sidebar } from './components/Sidebar';
 import { NavTab } from './types/cricket';
-import { LiveCoachPage } from './pages/LiveCoachPage';
-import { DashboardPage } from './pages/DashboardPage';
-import { UploadPage } from './pages/UploadPage';
-import { WorkspacePage } from './pages/WorkspacePage';
-import { BiomechanicsPage } from './pages/BiomechanicsPage';
-import { PhasesPage } from './pages/PhasesPage';
-import { ComparisonPage } from './pages/ComparisonPage';
-import { ProgressPage } from './pages/ProgressPage';
-import { EvaluationPage } from './pages/EvaluationPage';
-import { AboutPage } from './pages/AboutPage';
-import { ShotLibraryPage } from './pages/ShotLibraryPage';
 import { BrandLogo } from './components/BrandLogo';
-import { Menu } from 'lucide-react';
+import { Menu, Sparkles, Command } from 'lucide-react';
 import { api } from './services/api';
+import { MotionProvider } from './context/MotionContext';
+import { CommandPalette } from './components/CommandPalette';
+
+// Code-split pages for cinematic load times & chunk isolation
+const LiveCoachPage = lazy(() => import('./pages/LiveCoachPage').then(m => ({ default: m.LiveCoachPage })));
+const ShotLibraryPage = lazy(() => import('./pages/ShotLibraryPage').then(m => ({ default: m.ShotLibraryPage })));
+const DashboardPage = lazy(() => import('./pages/DashboardPage').then(m => ({ default: m.DashboardPage })));
+const UploadPage = lazy(() => import('./pages/UploadPage').then(m => ({ default: m.UploadPage })));
+const WorkspacePage = lazy(() => import('./pages/WorkspacePage').then(m => ({ default: m.WorkspacePage })));
+const BiomechanicsPage = lazy(() => import('./pages/BiomechanicsPage').then(m => ({ default: m.BiomechanicsPage })));
+const PhasesPage = lazy(() => import('./pages/PhasesPage').then(m => ({ default: m.PhasesPage })));
+const ComparisonPage = lazy(() => import('./pages/ComparisonPage').then(m => ({ default: m.ComparisonPage })));
+const ProgressPage = lazy(() => import('./pages/ProgressPage').then(m => ({ default: m.ProgressPage })));
+const EvaluationPage = lazy(() => import('./pages/EvaluationPage').then(m => ({ default: m.EvaluationPage })));
+const AboutPage = lazy(() => import('./pages/AboutPage').then(m => ({ default: m.AboutPage })));
+
+function PageSkeleton() {
+  return (
+    <div className="min-h-[70vh] flex flex-col items-center justify-center p-8 space-y-4">
+      <div className="relative">
+        <div className="w-12 h-12 rounded-2xl border-2 border-[#7FEA35]/30 border-t-[#7FEA35] animate-spin" />
+        <div className="absolute inset-0 flex items-center justify-center">
+          <div className="w-2 h-2 rounded-full bg-[#7FEA35] animate-pulse" />
+        </div>
+      </div>
+      <div className="text-center space-y-1">
+        <p className="text-xs font-mono font-bold tracking-wider text-slate-300 uppercase">
+          Loading Biomechanical Viewport
+        </p>
+        <p className="text-[11px] text-slate-500 font-mono">
+          Calibrating kinematics & 3D telemetry...
+        </p>
+      </div>
+    </div>
+  );
+}
 
 export function App() {
   // Mode A: Live Batting Coach is the primary default experience
   const [currentTab, setCurrentTab] = useState<NavTab>('live');
   const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
   const [targetShot, setTargetShot] = useState<string>('Cover Drive');
+  const [isCommandPaletteOpen, setIsCommandPaletteOpen] = useState(false);
 
   // Sidebar collapse state with localStorage persistence
   const [isSidebarCollapsed, setIsSidebarCollapsed] = useState<boolean>(() => {
@@ -42,9 +68,14 @@ export function App() {
     });
   };
 
-  // Global keyboard shortcut '[' to collapse/expand sidebar
+  // Global keyboard shortcuts: '[' for sidebar, 'Cmd/Ctrl + K' for Command Palette
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setIsCommandPaletteOpen((prev) => !prev);
+        return;
+      }
       if (
         e.key === '[' &&
         !['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)
@@ -70,148 +101,186 @@ export function App() {
     setActiveSessionId(sessionId);
   };
 
-  return (
-    <div className="min-h-screen bg-navy-950 text-slate-100 flex flex-col font-sans selection:bg-brand-500 selection:text-navy-950">
-      {/* Mobile Top Header (hidden on desktop md:) */}
-      <header className="md:hidden flex items-center justify-between px-4 h-14 bg-[#0A0C0E] border-b border-[#303438] sticky top-0 z-20">
-        <div className="flex items-center space-x-3">
-          <button
-            onClick={() => setIsMobileNavOpen(true)}
-            className="p-1.5 rounded-lg text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D] cursor-pointer"
-            aria-label="Open navigation menu"
-          >
-            <Menu className="w-5 h-5" />
-          </button>
-          <BrandLogo
-            variant="navbar"
-            onClick={() => setCurrentTab('dashboard')}
-          />
-        </div>
-        {activeSessionId && (
-          <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#181B1D] text-[#7FEA35] border border-[#303438]">
-            {activeSessionId.slice(0, 6)}...
-          </span>
-        )}
-      </header>
+  const handleSelectShotFromPalette = (shotName: string) => {
+    setTargetShot(shotName);
+    setCurrentTab('library');
+  };
 
-      {/* Main Container: Sticky/Collapsible Sidebar + Page Content */}
-      <div className="flex flex-1 min-h-0">
-        <Sidebar
-          currentTab={currentTab}
-          onSelectTab={setCurrentTab}
-          activeSessionId={activeSessionId}
-          isCollapsed={isSidebarCollapsed}
-          onToggleCollapse={toggleSidebarCollapse}
-          isMobileOpen={isMobileNavOpen}
-          onCloseMobile={() => setIsMobileNavOpen(false)}
+  return (
+    <MotionProvider>
+      <div className="min-h-screen bg-[#050505] text-slate-100 flex flex-col font-sans selection:bg-[#7FEA35] selection:text-[#050505] relative antialiased">
+        {/* Subtle Sports-Tech Scanline Background Grid */}
+        <div className="fixed inset-0 pointer-events-none bg-scanlines opacity-40 z-0" />
+
+        {/* Global Command Palette (Ctrl/Cmd + K) */}
+        <CommandPalette
+          isOpen={isCommandPaletteOpen}
+          onClose={() => setIsCommandPaletteOpen(false)}
+          onSelectTab={(tab) => {
+            setCurrentTab(tab);
+            setIsCommandPaletteOpen(false);
+          }}
+          onSelectShot={handleSelectShotFromPalette}
         />
 
-        <div className="flex-1 flex flex-col min-w-0">
-          <main className="flex-1 pb-16">
-            {/* Mode A: Primary Real-Time Live AI Batting Coach */}
-            {currentTab === 'live' && (
-              <LiveCoachPage
-                onSelectTab={setCurrentTab}
-                onSelectSession={handleSessionSelected}
-                initialTargetShot={targetShot}
-              />
+        {/* Mobile Top Header (hidden on desktop md:) */}
+        <header className="md:hidden flex items-center justify-between px-4 h-14 bg-[#0A0C0E]/90 backdrop-blur-md border-b border-[#303438] sticky top-0 z-20">
+          <div className="flex items-center space-x-3">
+            <button
+              onClick={() => setIsMobileNavOpen(true)}
+              className="p-1.5 rounded-lg text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D] cursor-pointer"
+              aria-label="Open navigation menu"
+            >
+              <Menu className="w-5 h-5" />
+            </button>
+            <BrandLogo
+              variant="navbar"
+              onClick={() => setCurrentTab('dashboard')}
+            />
+          </div>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setIsCommandPaletteOpen(true)}
+              className="p-1.5 rounded-lg text-[#A5A9AD] hover:text-[#7FEA35] hover:bg-[#181B1D] cursor-pointer"
+              title="Command Palette (Ctrl+K)"
+            >
+              <Command className="w-4 h-4" />
+            </button>
+            {activeSessionId && (
+              <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[#181B1D] text-[#7FEA35] border border-[#303438]">
+                {activeSessionId.slice(0, 6)}...
+              </span>
             )}
+          </div>
+        </header>
 
-            {/* Centralized Shot Library */}
-            {currentTab === 'library' && (
-              <ShotLibraryPage
-                onSelectTab={setCurrentTab}
-                onSelectShotForAction={(shotName) => setTargetShot(shotName)}
-                onSelectSession={handleSessionSelected}
-              />
-            )}
+        {/* Main Container: Sticky/Collapsible Sidebar + Page Content */}
+        <div className="flex flex-1 min-h-0 relative z-10">
+          <Sidebar
+            currentTab={currentTab}
+            onSelectTab={setCurrentTab}
+            activeSessionId={activeSessionId}
+            isCollapsed={isSidebarCollapsed}
+            onToggleCollapse={toggleSidebarCollapse}
+            isMobileOpen={isMobileNavOpen}
+            onCloseMobile={() => setIsMobileNavOpen(false)}
+          />
 
-            {/* Mode B: Detailed Video Analysis & Analytics Suite */}
-            {currentTab === 'dashboard' && (
-              <DashboardPage
-                onSelectTab={setCurrentTab}
-                onSelectSession={handleSessionSelected}
-              />
-            )}
+          <div className="flex-1 flex flex-col min-w-0">
+            <main className="flex-1 pb-16">
+              <Suspense fallback={<PageSkeleton />}>
+                {/* Mode A: Primary Real-Time Live AI Batting Coach */}
+                {currentTab === 'live' && (
+                  <LiveCoachPage
+                    onSelectTab={setCurrentTab}
+                    onSelectSession={handleSessionSelected}
+                    initialTargetShot={targetShot}
+                  />
+                )}
 
-            {currentTab === 'upload' && (
-              <UploadPage
-                onSessionCreated={handleSessionSelected}
-                onSelectTab={setCurrentTab}
-                initialShotType={targetShot}
-              />
-            )}
+                {/* Centralized Shot Library */}
+                {currentTab === 'library' && (
+                  <ShotLibraryPage
+                    onSelectTab={setCurrentTab}
+                    onSelectShotForAction={(shotName) => setTargetShot(shotName)}
+                    onSelectSession={handleSessionSelected}
+                  />
+                )}
 
-            {currentTab === 'workspace' && (
-              <WorkspacePage
-                sessionId={activeSessionId}
-                onSelectTab={setCurrentTab}
-                onSelectSession={handleSessionSelected}
-              />
-            )}
+                {/* Mode B: Detailed Video Analysis & Analytics Suite */}
+                {currentTab === 'dashboard' && (
+                  <DashboardPage
+                    onSelectTab={setCurrentTab}
+                    onSelectSession={handleSessionSelected}
+                  />
+                )}
 
-            {currentTab === 'biomechanics' && (
-              <BiomechanicsPage
-                sessionId={activeSessionId}
-                onSelectTab={setCurrentTab}
-              />
-            )}
+                {currentTab === 'upload' && (
+                  <UploadPage
+                    onSessionCreated={handleSessionSelected}
+                    onSelectTab={setCurrentTab}
+                    initialShotType={targetShot}
+                  />
+                )}
 
-            {currentTab === 'phases' && (
-              <PhasesPage
-                sessionId={activeSessionId}
-                onSelectTab={setCurrentTab}
-              />
-            )}
+                {currentTab === 'workspace' && (
+                  <WorkspacePage
+                    sessionId={activeSessionId}
+                    onSelectTab={setCurrentTab}
+                    onSelectSession={handleSessionSelected}
+                  />
+                )}
 
-            {currentTab === 'comparison' && (
-              <ComparisonPage
-                sessionId={activeSessionId}
-                onSelectTab={setCurrentTab}
-                onSelectSession={handleSessionSelected}
-              />
-            )}
+                {currentTab === 'biomechanics' && (
+                  <BiomechanicsPage
+                    sessionId={activeSessionId}
+                    onSelectTab={setCurrentTab}
+                  />
+                )}
 
-            {currentTab === 'progress' && (
-              <ProgressPage
-                onSelectSession={handleSessionSelected}
-                onSelectTab={setCurrentTab}
-              />
-            )}
+                {currentTab === 'phases' && (
+                  <PhasesPage
+                    sessionId={activeSessionId}
+                    onSelectTab={setCurrentTab}
+                  />
+                )}
 
-            {currentTab === 'evaluation' && <EvaluationPage />}
+                {currentTab === 'comparison' && (
+                  <ComparisonPage
+                    sessionId={activeSessionId}
+                    onSelectTab={setCurrentTab}
+                    onSelectSession={handleSessionSelected}
+                  />
+                )}
 
-            {currentTab === 'about' && <AboutPage onSelectTab={setCurrentTab} />}
-          </main>
+                {currentTab === 'progress' && (
+                  <ProgressPage
+                    onSelectSession={handleSessionSelected}
+                    onSelectTab={setCurrentTab}
+                  />
+                )}
 
-          {/* Sports-Tech Brand Footer */}
-          <footer className="border-t border-[#303438] bg-[#050505] py-8 text-xs text-[#A5A9AD]">
-            <div className="max-w-[1550px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
-              <div className="flex items-center space-x-3">
-                <span className="text-[#F5F5F5] font-black text-sm">
-                  Cricket<span className="text-[#7FEA35]">IQ</span>
-                </span>
-                <span className="text-[#303438]">|</span>
-                <span className="text-[#7FEA35] font-bold tracking-wider text-[11px] font-mono">
-                  AI POWERED BATTING COACH
-                </span>
+                {currentTab === 'evaluation' && <EvaluationPage />}
+
+                {currentTab === 'about' && <AboutPage onSelectTab={setCurrentTab} />}
+              </Suspense>
+            </main>
+
+            {/* Sports-Tech Brand Footer */}
+            <footer className="border-t border-[#303438] bg-[#050505]/95 backdrop-blur-md py-8 text-xs text-[#A5A9AD]">
+              <div className="max-w-[1550px] mx-auto px-4 sm:px-6 lg:px-8 flex flex-col md:flex-row items-center justify-between gap-4">
+                <div className="flex items-center space-x-3">
+                  <span className="text-[#F5F5F5] font-black text-sm tracking-tight">
+                    Cricket<span className="text-[#7FEA35]">IQ</span>
+                  </span>
+                  <span className="text-[#303438]">|</span>
+                  <span className="text-[#7FEA35] font-bold tracking-wider text-[11px] font-mono">
+                    AI POWERED BATTING COACH
+                  </span>
+                </div>
+                <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#A5A9AD] font-mono">
+                  <span>Real-Time Practice</span>
+                  <span>•</span>
+                  <span>Video Assessment</span>
+                  <span>•</span>
+                  <span>25 Shot Library</span>
+                  <span>•</span>
+                  <span>Kinematic Ghost</span>
+                  <span>•</span>
+                  <button
+                    onClick={() => setIsCommandPaletteOpen(true)}
+                    className="inline-flex items-center space-x-1 px-1.5 py-0.5 rounded bg-[#181B1D] text-slate-300 hover:text-white border border-[#303438] cursor-pointer"
+                  >
+                    <Command className="w-3 h-3 text-[#7FEA35]" />
+                    <span>K for Quick Jump</span>
+                  </button>
+                </div>
               </div>
-              <div className="flex flex-wrap items-center justify-center gap-3 text-[11px] text-[#A5A9AD] font-medium">
-                <span>Real-Time Practice</span>
-                <span>•</span>
-                <span>Video Technique Assessment</span>
-                <span>•</span>
-                <span>25 Shot Library</span>
-                <span>•</span>
-                <span>Movement Tracking</span>
-                <span>•</span>
-                <span>Practice History</span>
-              </div>
-            </div>
-          </footer>
+            </footer>
+          </div>
         </div>
       </div>
-    </div>
+    </MotionProvider>
   );
 }
 

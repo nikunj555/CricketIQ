@@ -24,6 +24,8 @@ class FrameMetric(BaseModel):
     head_y: Optional[float] = None
     head_displacement: Optional[float] = None
     stance_width_norm: Optional[float] = None
+    # Landmarks
+    landmarks: Optional[List[Any]] = None
     # Upper-body & arm kinematics
     lead_elbow_angle: Optional[float] = None
     rear_elbow_angle: Optional[float] = None
@@ -139,26 +141,34 @@ class AnalysisResult(BaseModel):
     prediction_confidence: Optional[float] = None
     user_confirmed_shot_type: Optional[str] = None
     shot_classification: Optional[Dict[str, Any]] = None
-    handedness: str
-    camera_angle: str
+    handedness: str = "Right-handed"
+    camera_angle: str = "Side-on (Right)"
     detected_camera_view: Optional[str] = None
     camera_view_warning: Optional[str] = None
     shot_mismatch_warning: Optional[str] = None
     striker_track_id: Optional[int] = None
+    striker_isolation_evidence: Optional[Dict[str, Any]] = None
+    striker_tracking_status: Optional[str] = None
+    tracking_dropout_warning: Optional[str] = None
+    shot_confidence: Optional[Dict[str, Any]] = None
+    coaching_paused: Optional[bool] = False
+    pause_reason: Optional[str] = None
+    plain_summary: Optional[Dict[str, Any]] = None
+    issue_cards: Optional[List[Dict[str, Any]]] = None
     overall_technique_score: Optional[float] = None
-    top_mistakes: List[CoachingObservation] = Field(default_factory=list)
-    fps: float
-    duration_sec: float
-    total_frames: int
-    analyzed_frames: int
-    sample_rate: int
-    summary: MetricSummary
-    phases: List[PhaseSegment]
-    time_series: List[FrameMetric]
-    coaching_feedback: List[CoachingObservation]
-    limitations: List[str]
-    model_metadata: Dict[str, Any]
-    created_at: str
+    top_mistakes: List[Any] = Field(default_factory=list)
+    fps: float = 30.0
+    duration_sec: float = 0.0
+    total_frames: int = 0
+    analyzed_frames: int = 0
+    sample_rate: int = 1
+    summary: Optional[Any] = None
+    phases: List[PhaseSegment] = Field(default_factory=list)
+    time_series: List[FrameMetric] = Field(default_factory=list)
+    coaching_feedback: List[Any] = Field(default_factory=list)
+    limitations: List[str] = Field(default_factory=list)
+    model_metadata: Dict[str, Any] = Field(default_factory=dict)
+    created_at: Optional[str] = None
 
 class StrikerCandidate(BaseModel):
     track_id: int
@@ -166,6 +176,8 @@ class StrikerCandidate(BaseModel):
     is_default: bool
     role: str
     wrist_motion_score: float
+    confidence: Optional[float] = None
+    evidence: Optional[Dict[str, Any]] = None
 
 class StrikerInspectionResponse(BaseModel):
     candidates: List[StrikerCandidate]
@@ -174,6 +186,7 @@ class StrikerInspectionResponse(BaseModel):
     frame_width: int
     frame_height: int
     frame_0_data_url: Optional[str] = None
+    needs_confirmation: bool = False
 
 class VideoUploadResponse(BaseModel):
     session_id: str

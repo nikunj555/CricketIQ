@@ -266,47 +266,83 @@ Evaluated on the held-out test split (21 sequences, 1,223 frames):
 ## 20. Installation & Execution Instructions
 
 ### Prerequisites
-* **Python:** 3.11 or 3.12 (Installed and added to PATH)
-* **Node.js:** v20+ or v22+ with `npm` (Installed)
+* **Python:** 3.12+ (64-bit, verified on Python 3.12.4)
+* **Node.js:** v20+ or v22+ (verified on Node v22.18.0) with `npm` >= 9.0.0
+* **OS:** Windows 10/11, macOS, or Ubuntu Linux
 
-### Step 1: Install Backend Dependencies
+### Option A: One-Command Automated Setup (Recommended)
+
+**On Windows (PowerShell):**
 ```powershell
-pip install -r backend/requirements.txt
+powershell -ExecutionPolicy Bypass -File scripts/setup.ps1
 ```
 
-### Step 2: Install Frontend Dependencies
-```powershell
-cd frontend
-npm install
-cd ..
+**On Linux / macOS (Bash):**
+```bash
+chmod +x scripts/*.sh
+./scripts/setup.sh
 ```
 
-### Step 3: Run the Full Stack Application
-You can launch both services using the provided batch script:
-```cmd
-run_all.bat
-```
-Or launch them independently in separate terminals:
+*(This automatically creates `.venv`, installs pinned dependencies, verifies SHA256 checksums of MediaPipe models, initializes SQLite database indexes, seeds sample data, and compiles frontend assets).*
 
-**Terminal 1 (Backend):**
-```powershell
-$env:PYTHONPATH="."
-python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000 --reload
-```
+---
 
-**Terminal 2 (Frontend):**
+### Option B: One-Command Development Startup
+
 ```powershell
-cd frontend
+# Windows (PowerShell)
 npm run dev
+# Or directly:
+powershell -ExecutionPolicy Bypass -File scripts/dev.ps1
+
+# Linux / macOS (Bash)
+npm run dev:sh
+# Or directly:
+./scripts/dev.sh
 ```
 
-Open your browser to: **`http://localhost:5173`** *(Launches directly into Mode A: Live Batting Coach)*.
+Both backend (FastAPI at `http://127.0.0.1:8000`) and frontend (Vite at `http://localhost:5173`) start concurrently, wait for backend health check, and cleanly shut down on `Ctrl+C`.
 
-### Step 4: Run Automated Tests
+---
+
+### Option C: Single-Port Production Mode
+When the frontend is compiled (`npm run build`), the FastAPI backend automatically mounts and serves the React SPA from `/` with client-side route fallback:
 ```powershell
-pytest -v
+python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000
 ```
-*(All 17 unit and integration tests will execute and verify vector geometry, DTW alignment, REST API endpoints, and live state machine logic).*
+Open your browser to: **`http://127.0.0.1:8000/`**.
+
+---
+
+### Quality Gates & Verification Commands
+```powershell
+# 1. Run the complete Pytest backend test suite (90/90 tests passing)
+pytest backend/tests -v
+
+# 2. Run the 7-subsystem End-to-End Smoke Test
+python scripts/smoke_test.py
+
+# 3. Run Playwright E2E visual verification with synthetic camera stream
+npm run test:e2e --prefix frontend
+
+# 4. Frontend TypeScript validation & production compilation
+npm run build --prefix frontend
+
+# 5. Frontend code linter
+npm run lint --prefix frontend
+```
+
+---
+
+### Troubleshooting & Common Gotchas
+1. **Camera Permissions in Chrome/Brave:**
+   - Chrome requires HTTPS or `localhost` / `127.0.0.1` to access media devices via `getUserMedia`. If hosting across a local area network, enable `chrome://flags/#unsafely-treat-insecure-origin-as-secure`.
+2. **MediaPipe C++ Logs:**
+   - Benign notices from `inference_feedback_manager.cc` and `landmark_projection_calculator.cc` represent normal TFLite delegate initialization and are suppressed via environment variables `GLOG_minloglevel=3` and `TF_CPP_MIN_LOG_LEVEL=3`.
+3. **OpenCV Video Codecs:**
+   - If uploaded videos fail to decode, ensure FFmpeg is available on your PATH or installed via `imageio-ffmpeg`. The backend includes automatic transcoding fallback to standard browser H.264 / AAC.
+4. **V8 Zone Memory on Huge JSON Literals:**
+   - Large keyframe animations are stored as external JSON (`shotAnimations.json`) with chunk-level code splitting rather than monolithic TypeScript ASTs to prevent JavaScript runtime memory exhaustion.
 
 ---
 

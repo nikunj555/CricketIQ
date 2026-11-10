@@ -13,17 +13,41 @@ import {
   ShotListResponse,
 } from '../types/cricket';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:8000/api';
+const rawBase =
+  import.meta.env.VITE_API_BASE ||
+  (typeof window !== 'undefined'
+    ? `${window.location.origin}/api`
+    : 'http://127.0.0.1:8000/api');
+
+const API_BASE = rawBase.replace(/\/+$/, '');
+
+async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  try {
+    return await fetch(input, init);
+  } catch (err: unknown) {
+    const errorObj = err as { name?: string; message?: string };
+    if (
+      errorObj?.name === 'TypeError' ||
+      errorObj?.message?.includes('Failed to fetch') ||
+      errorObj?.message?.includes('NetworkError')
+    ) {
+      throw new Error(
+        'Backend server unreachable. Please verify the CricketIQ engine is running at http://127.0.0.1:8000.'
+      );
+    }
+    throw err;
+  }
+}
 
 export const api = {
   async getHealth() {
-    const res = await fetch(`${API_BASE}/health`);
+    const res = await apiFetch(`${API_BASE}/health`);
     if (!res.ok) throw new Error('Health check failed');
     return res.json();
   },
 
   async uploadVideo(formData: FormData) {
-    const res = await fetch(`${API_BASE}/video/upload`, {
+    const res = await apiFetch(`${API_BASE}/video/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -35,7 +59,7 @@ export const api = {
   },
 
   async inspectStrikers(formData: FormData) {
-    const res = await fetch(`${API_BASE}/video/inspect-strikers`, {
+    const res = await apiFetch(`${API_BASE}/video/inspect-strikers`, {
       method: 'POST',
       body: formData,
     });
@@ -47,13 +71,13 @@ export const api = {
   },
 
   async getProcessingStatus(sessionId: string): Promise<VideoProcessingStatus> {
-    const res = await fetch(`${API_BASE}/video/status/${sessionId}`);
+    const res = await apiFetch(`${API_BASE}/video/status/${sessionId}`);
     if (!res.ok) throw new Error('Failed to fetch processing status');
     return res.json();
   },
 
   async getAnalysis(sessionId: string): Promise<AnalysisResult> {
-    const res = await fetch(`${API_BASE}/analysis/${sessionId}`);
+    const res = await apiFetch(`${API_BASE}/analysis/${sessionId}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Analysis not found' }));
       throw new Error(err.detail || 'Failed to fetch analysis');
@@ -66,7 +90,7 @@ export const api = {
     params.set('limit', limit.toString());
     if (shotType && shotType !== 'All') params.set('shot_type', shotType);
     if (category && category !== 'All') params.set('category', category);
-    const res = await fetch(`${API_BASE}/sessions?${params.toString()}`);
+    const res = await apiFetch(`${API_BASE}/sessions?${params.toString()}`);
     if (!res.ok) throw new Error('Failed to fetch session list');
     return res.json();
   },
@@ -87,13 +111,13 @@ export const api = {
       params.set('reference_only', 'true');
     }
     const queryString = params.toString() ? `?${params.toString()}` : '';
-    const res = await fetch(`${API_BASE}/shots${queryString}`);
+    const res = await apiFetch(`${API_BASE}/shots${queryString}`);
     if (!res.ok) throw new Error('Failed to fetch shot library');
     return res.json();
   },
 
   async getShot(idOrSlug: string): Promise<CricketShot> {
-    const res = await fetch(`${API_BASE}/shots/${encodeURIComponent(idOrSlug)}`);
+    const res = await apiFetch(`${API_BASE}/shots/${encodeURIComponent(idOrSlug)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Shot not found' }));
       throw new Error(err.detail || 'Failed to fetch shot details');
@@ -102,7 +126,7 @@ export const api = {
   },
 
   async getShotReference(idOrSlug: string) {
-    const res = await fetch(`${API_BASE}/reference/shots/${encodeURIComponent(idOrSlug)}`);
+    const res = await apiFetch(`${API_BASE}/reference/shots/${encodeURIComponent(idOrSlug)}`);
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Reference not found' }));
       throw new Error(err.detail || 'Failed to fetch shot reference');
@@ -111,7 +135,7 @@ export const api = {
   },
 
   async uploadCustomReference(formData: FormData) {
-    const res = await fetch(`${API_BASE}/reference/upload`, {
+    const res = await apiFetch(`${API_BASE}/reference/upload`, {
       method: 'POST',
       body: formData,
     });
@@ -123,7 +147,7 @@ export const api = {
   },
 
   async confirmShotType(sessionId: string, confirmedShotType: string) {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}/confirm-shot`, {
+    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}/confirm-shot`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ confirmed_shot_type: confirmedShotType }),
@@ -135,8 +159,21 @@ export const api = {
     return res.json();
   },
 
+  async reanalyzeShot(sessionId: string, shotType: string, lang = 'en'): Promise<AnalysisResult> {
+    const res = await apiFetch(`${API_BASE}/analysis/${sessionId}/reanalyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ shot_type: shotType, lang }),
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to re-analyse shot' }));
+      throw new Error(err.detail || 'Failed to re-analyse shot');
+    }
+    return res.json();
+  },
+
   async deleteSession(sessionId: string) {
-    const res = await fetch(`${API_BASE}/sessions/${sessionId}`, {
+    const res = await apiFetch(`${API_BASE}/sessions/${sessionId}`, {
       method: 'DELETE',
     });
     if (!res.ok) throw new Error('Failed to delete session');
@@ -144,7 +181,7 @@ export const api = {
   },
 
   async listReferences(): Promise<ReferenceShotMeta[]> {
-    const res = await fetch(`${API_BASE}/comparison/references`);
+    const res = await apiFetch(`${API_BASE}/comparison/references`);
     if (!res.ok) throw new Error('Failed to fetch reference benchmarks');
     return res.json();
   },
@@ -154,7 +191,7 @@ export const api = {
     referenceId?: string,
     targetSessionId?: string
   ): Promise<ComparisonResult> {
-    const res = await fetch(`${API_BASE}/comparison/compare`, {
+    const res = await apiFetch(`${API_BASE}/comparison/compare`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -171,7 +208,7 @@ export const api = {
   },
 
   async getEvaluationReport(): Promise<ModelEvaluationReport> {
-    const res = await fetch(`${API_BASE}/evaluation/report`);
+    const res = await apiFetch(`${API_BASE}/evaluation/report`);
     if (!res.ok) throw new Error('Failed to fetch model evaluation report');
     return res.json();
   },
@@ -181,7 +218,7 @@ export const api = {
      ========================================================================= */
 
   async processLiveFrame(payload: LiveFrameRequest): Promise<LivePoseState> {
-    const res = await fetch(`${API_BASE}/live/process-frame`, {
+    const res = await apiFetch(`${API_BASE}/live/process-frame`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -191,7 +228,7 @@ export const api = {
   },
 
   async analyzeLiveAttempt(payload: LiveAttemptPayload): Promise<LiveAttemptFeedback> {
-    const res = await fetch(`${API_BASE}/live/analyze-attempt`, {
+    const res = await apiFetch(`${API_BASE}/live/analyze-attempt`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(payload),
@@ -201,7 +238,7 @@ export const api = {
   },
 
   async getLiveSessionAttempts(sessionId: string): Promise<LiveAttemptFeedback[]> {
-    const res = await fetch(`${API_BASE}/live/session/${sessionId}/attempts`);
+    const res = await apiFetch(`${API_BASE}/live/session/${sessionId}/attempts`);
     if (!res.ok) throw new Error('Failed to fetch live session attempts');
     return res.json();
   },
@@ -211,33 +248,42 @@ export const api = {
      ========================================================================= */
 
   async getProgressSummary(limit = 200) {
-    const res = await fetch(`${API_BASE}/progress/summary?limit=${limit}`);
+    const res = await apiFetch(`${API_BASE}/progress/summary?limit=${limit}`);
     if (!res.ok) throw new Error('Failed to fetch progress summary');
     return res.json();
   },
 
   async getProgressShots(): Promise<string[]> {
-    const res = await fetch(`${API_BASE}/progress/shots`);
+    const res = await apiFetch(`${API_BASE}/progress/shots`);
     if (!res.ok) throw new Error('Failed to fetch available progress shots');
     return res.json();
   },
 
   async getShotProgress(shotType: string, limit = 50) {
-    const res = await fetch(`${API_BASE}/progress/shots/${encodeURIComponent(shotType)}?limit=${limit}`);
+    const res = await apiFetch(`${API_BASE}/progress/shots/${encodeURIComponent(shotType)}?limit=${limit}`);
     if (!res.ok) throw new Error(`Failed to fetch progress trend for ${shotType}`);
     return res.json();
   },
 
   getWebSocketUrl(sessionId: string): string {
-    const httpBase = API_BASE.replace('/api', '');
-    const wsBase = httpBase.replace('http://', 'ws://').replace('https://', 'wss://');
-    return `${wsBase}/api/live/ws/${sessionId}`;
+    if (typeof window !== 'undefined') {
+      const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      const host = API_BASE.startsWith('http')
+        ? new URL(API_BASE).host
+        : window.location.host;
+      return `${wsProtocol}//${host}/api/live/ws/${sessionId}`;
+    }
+    return `ws://127.0.0.1:8000/api/live/ws/${sessionId}`;
   },
 
   getVideoUrl(path: string | null | undefined): string {
     if (!path) return '';
     if (path.startsWith('http')) return path;
-    const base = API_BASE.replace('/api', '');
-    return `${base}${path.startsWith('/') ? '' : '/'}${path}`;
+    const cleanPath = path.startsWith('/') ? path : `/${path}`;
+    if (typeof window !== 'undefined') {
+      const host = API_BASE.startsWith('http') ? new URL(API_BASE).origin : window.location.origin;
+      return `${host}${cleanPath}`;
+    }
+    return `http://127.0.0.1:8000${cleanPath}`;
   },
 };

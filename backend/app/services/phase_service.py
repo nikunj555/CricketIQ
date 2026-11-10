@@ -164,26 +164,29 @@ class PhaseService:
         wrist_xs = np.array([m.get("lead_wrist_x") or 0.50 for m in metrics], dtype=float)
         confidences_raw = np.array([m.get("confidence") or 0.80 for m in metrics], dtype=float)
 
-        # Smooth using Savitzky-Golay or 5-point moving average
+        # Smooth using 5-point moving average
         w = min(5, T if T % 2 == 1 else T - 1)
         w = max(3, w)
         kernel = np.ones(w) / w
-        w_xs = np.convolve(wrist_xs, kernel, mode="same")
-        w_ys = np.convolve(wrist_ys, kernel, mode="same")
         knee_s = np.convolve(knee_angles, kernel, mode="same")
         sw_s = np.convolve(stance_widths, kernel, mode="same")
 
-        vx = np.gradient(w_xs)
-        vy = np.gradient(w_ys)
-        v_wrist = np.sqrt(vx**2 + vy**2)
-
-        # Check for alternative wrist speed / separation signals if 2D coordinates are static
-        wrist_signals = [m.get("lead_wrist_speed") or m.get("wrist_separation") for m in metrics]
-        if any(w is not None for w in wrist_signals):
+        is_static_xy = (np.ptp(wrist_xs) <= 1e-4 and np.ptp(wrist_ys) <= 1e-4)
+        if is_static_xy:
+            wrist_signals = [m.get("lead_wrist_speed") or m.get("wrist_separation") for m in metrics]
             v_alt = np.array([float(w or 0.0) for w in wrist_signals], dtype=float)
-            if np.ptp(v_alt) > 1e-4:
-                v_wrist = v_alt
-                vy = np.gradient(v_alt)
+            v_wrist = v_alt
+            vy = np.zeros(T)
+            downward_bonus = np.ones(T)
+            w_xs = wrist_xs
+            w_ys = wrist_ys
+        else:
+            w_xs = np.convolve(wrist_xs, kernel, mode="same")
+            w_ys = np.convolve(wrist_ys, kernel, mode="same")
+            vx = np.gradient(w_xs)
+            vy = np.gradient(w_ys)
+            v_wrist = np.sqrt(vx**2 + vy**2)
+            downward_bonus = np.where(vy > 0, 1.25, 0.75)
 
         # 2. Locate the Impact Window via Peak Downward Wrist Acceleration & Velocity
         # Search across sequence excluding edge margins (first 6%, last 6%)

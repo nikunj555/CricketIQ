@@ -31,6 +31,7 @@ import {
 } from 'recharts';
 import { SessionListItem, SessionListResponse, CricketShot, NavTab } from '../types/cricket';
 import { api } from '../services/api';
+import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface ProgressPageProps {
   onSelectSession: (sessionId: string) => void;
@@ -316,8 +317,44 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
             </ResponsiveContainer>
           </div>
         ) : (
-          <div className="p-8 rounded-xl bg-[#111315] border border-[#303438] text-center text-xs text-[#A5A9AD]">
-            No completed attempts recorded yet for {selectedShotFilter}. Record a swing in Live Coach or upload a video.
+          <div className="p-6 rounded-2xl bg-[#111315] border border-[#303438] flex flex-col md:flex-row items-center gap-6">
+            <div className="w-full md:w-1/2 h-56 rounded-xl overflow-hidden border border-[#303438] bg-[#050505]">
+              <Batter3DCanvas
+                shotName={selectedShotFilter}
+                isGhost={true}
+                ghostColor="#00f0ff"
+                height="100%"
+                showControls={false}
+                showPhaseScrubber={false}
+                showCameraPresets={false}
+                autoOrbitDefault={true}
+              />
+            </div>
+            <div className="w-full md:w-1/2 space-y-3 text-left">
+              <div className="inline-block px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800 text-cyan-300 text-[10px] font-mono font-bold uppercase">
+                Ghost Benchmark Active
+              </div>
+              <h4 className="text-sm font-bold text-white">
+                No recorded attempts yet for {selectedShotFilter}
+              </h4>
+              <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                CricketIQ will map your progress trajectory once you record or upload your first {selectedShotFilter} stroke.
+              </p>
+              <div className="flex items-center space-x-2 pt-1">
+                <button
+                  onClick={() => onSelectTab('live')}
+                  className="px-3 py-1.5 rounded-lg bg-[#7FEA35] text-[#050505] font-bold text-xs cursor-pointer hover:bg-[#94EE58] transition-colors"
+                >
+                  Practice in Live Coach
+                </button>
+                <button
+                  onClick={() => onSelectTab('upload')}
+                  className="px-3 py-1.5 rounded-lg bg-[#181B1D] text-white border border-[#303438] font-bold text-xs cursor-pointer hover:bg-[#25282c] transition-colors"
+                >
+                  Upload Video
+                </button>
+              </div>
+            </div>
           </div>
         )}
       </div>

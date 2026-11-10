@@ -83,11 +83,11 @@ def test_reproduce_problem_3_shot_previews_fallback_identical():
     with open(ref_shots_path, "r", encoding="utf-8") as f:
         ref_shots = json.load(f)
     coming_soon_refs = [name for name, data in ref_shots.items() if data.get("analysis_status") == "coming_soon"]
-    assert len(coming_soon_refs) == 20, "CONFIRMED: Exactly 20 shots are in coming_soon status in reference_shots.json"
+    assert len(coming_soon_refs) == 0, "VERIFIED: All shots have reference data authored"
     
-    # Yet in SHOT_CATALOGUE, they are all marked available/supported without distinguishing coming_soon
+    # In SHOT_CATALOGUE, all 25 calibrated shots are available
     catalog_available = [s for s in SHOT_CATALOGUE if s.get("reference_status") == "available"]
-    assert len(catalog_available) == 25, "CONFIRMED: Catalog incorrectly marks all 25 as available without coming_soon gating"
+    assert len(catalog_available) == 25, "VERIFIED: Catalog marks all 25 authored shots as available"
 
 
 def test_reproduce_problem_4_left_handed_unmirrored_divergence():
@@ -137,8 +137,8 @@ def test_reproduce_problem_5_camera_views_lack_validity_matrix():
     phases = [{"phase_name": "Impact window", "start_frame": 14, "end_frame": 16, "key_frame": 15}]
     summary = {"lead_knee_flexion_at_impact": 168.0}
     
-    # Currently evaluate_technique has no camera_view parameter!
+    # evaluate_technique has camera_view parameter and validity matrix
     import inspect
     sig = inspect.signature(feedback_service.evaluate_technique)
-    assert "camera_view" not in sig.parameters, \
-        "CONFIRMED: evaluate_technique lacks camera_view parameter and validity matrix"
+    assert "camera_view" in sig.parameters, \
+        "VERIFIED: evaluate_technique includes camera_view parameter and validity matrix"

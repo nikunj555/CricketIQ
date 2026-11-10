@@ -18,6 +18,12 @@ export default {
           600: '#68c827',
           700: '#4f9b1c',
         },
+        // Secondary Telemetry Accent
+        cyan: {
+          400: '#22d3ee',
+          500: '#00f0ff', // High-tech telemetry cyan
+          600: '#0891b2',
+        },
         // Dark theme surfaces
         navy: {
           950: '#050505', // Primary Canvas Background
@@ -31,6 +37,7 @@ export default {
           dark: '#050505',
           surface: '#181b1d',
           lime: '#7fea35',
+          cyan: '#00f0ff',
           border: '#303438',
           amber: '#e5a118',
           red: '#ef4444',
@@ -39,7 +46,11 @@ export default {
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+        display: ['Inter', 'system-ui', '-apple-system', 'BlinkMacSystemFont', 'sans-serif'],
         mono: ['JetBrains Mono', 'Fira Code', 'monospace'],
+      },
+      animation: {
+        'pulse-subtle': 'pulse 3s cubic-bezier(0.4, 0, 0.6, 1) infinite',
       }
     },
   },

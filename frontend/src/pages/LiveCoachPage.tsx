@@ -29,6 +29,7 @@ import {
 import { api } from '../services/api';
 import { LivePoseState, LiveAttemptFeedback, CricketShot, AnalysisResult, NavTab } from '../types/cricket';
 import { RealisticBatterVisualizer } from '../components/RealisticBatterVisualizer';
+import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface LiveCoachPageProps {
   onSelectTab: (tab: NavTab) => void;
@@ -59,6 +60,7 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
   const [targetShot, setTargetShot] = useState<string>(initialTargetShot || 'Cover Drive');
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
   const [showReferenceCoach, setShowReferenceCoach] = useState<boolean>(true);
+  const [coachAvatarMode, setCoachAvatarMode] = useState<'3d' | 'blueprint'>('3d');
 
   // Recording State Machine (Idle -> Countdown -> Recording -> Reviewing -> Analyzing)
   const [recordingState, setRecordingState] = useState<'idle' | 'countdown' | 'recording' | 'reviewing' | 'analyzing'>('idle');
@@ -1047,18 +1049,34 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
                   ref={canvasRef}
                   className={`absolute inset-0 w-full h-full pointer-events-none object-contain ${facingMode === 'user' && !isSimulation ? 'transform -scale-x-100' : ''}`}
                 />
+
+                {/* Viewfinder Broadcast HUD Corner Brackets */}
+                <div className="absolute top-3 left-3 w-5 h-5 border-t-2 border-l-2 border-[#7FEA35]/70 pointer-events-none" />
+                <div className="absolute top-3 right-3 w-5 h-5 border-t-2 border-r-2 border-[#7FEA35]/70 pointer-events-none" />
+                <div className="absolute bottom-3 left-3 w-5 h-5 border-b-2 border-l-2 border-[#7FEA35]/70 pointer-events-none" />
+                <div className="absolute bottom-3 right-3 w-5 h-5 border-b-2 border-r-2 border-[#7FEA35]/70 pointer-events-none" />
               </>
             )}
 
             {/* Countdown Overlay (3 -> 2 -> 1) */}
             {recordingState === 'countdown' && (
-              <div className="absolute inset-0 bg-black/60 backdrop-blur-sm flex flex-col items-center justify-center z-30">
-                <div className="text-8xl font-black text-[#7FEA35] animate-ping font-mono">
-                  {countdownNum}
+              <div className="absolute inset-0 bg-black/75 backdrop-blur-md flex flex-col items-center justify-center z-30 space-y-4">
+                <div className="relative flex items-center justify-center">
+                  <div className="w-28 h-28 rounded-full border-2 border-[#7FEA35]/40 animate-ping absolute" />
+                  <div className="w-24 h-24 rounded-full bg-[#111315] border-2 border-[#7FEA35] flex items-center justify-center shadow-[0_0_30px_rgba(127,234,53,0.3)]">
+                    <span className="text-6xl font-black text-[#7FEA35] font-mono leading-none">
+                      {countdownNum}
+                    </span>
+                  </div>
                 </div>
-                <p className="text-sm font-bold text-white mt-4 uppercase tracking-wider">
-                  Get into batting stance...
-                </p>
+                <div className="text-center space-y-1">
+                  <p className="text-xs font-mono font-bold text-white uppercase tracking-widest">
+                    Set Batting Stance
+                  </p>
+                  <p className="text-[11px] text-slate-400 font-mono">
+                    Target: {targetShot}
+                  </p>
+                </div>
               </div>
             )}
 
@@ -1286,16 +1304,48 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
                     Reference Form: {targetShot}
                   </span>
                 </div>
-                <span className="text-[10px] font-mono font-bold text-[#7FEA35] bg-[#7FEA35]/10 px-2 py-0.5 rounded border border-[#7FEA35]/20">
-                  Master Model
-                </span>
+                <div className="flex items-center space-x-1.5">
+                  <button
+                    onClick={() => setCoachAvatarMode('3d')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                      coachAvatarMode === '3d'
+                        ? 'bg-[#7FEA35] text-[#050505]'
+                        : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
+                    }`}
+                  >
+                    3D
+                  </button>
+                  <button
+                    onClick={() => setCoachAvatarMode('blueprint')}
+                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
+                      coachAvatarMode === 'blueprint'
+                        ? 'bg-[#00f0ff] text-[#050505]'
+                        : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
+                    }`}
+                  >
+                    2D
+                  </button>
+                </div>
               </div>
-              <RealisticBatterVisualizer
-                shotName={targetShot}
-                initialPhaseIndex={4}
-                showControls={true}
-                autoPlay={false}
-              />
+              {coachAvatarMode === '3d' ? (
+                <Batter3DCanvas
+                  shotName={targetShot}
+                  height={320}
+                  showTrail={true}
+                  showControls={true}
+                  showPhaseScrubber={false}
+                  showCameraPresets={true}
+                  autoOrbitDefault={false}
+                />
+              ) : (
+                <RealisticBatterVisualizer
+                  shotName={targetShot}
+                  handedness={handedness as 'Right' | 'Left'}
+                  initialPhaseIndex={4}
+                  showControls={true}
+                  autoPlay={false}
+                />
+              )}
             </div>
           )}
 

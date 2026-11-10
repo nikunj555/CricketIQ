@@ -125,6 +125,79 @@ export interface MetricComparisonRow {
   validity: 'MEASURED' | 'ESTIMATED' | 'UNAVAILABLE' | string;
 }
 
+export interface ShotConfidence {
+  shot: string;
+  confidence: number;
+  level: string;
+  level_code: 'very_sure' | 'fairly_sure' | 'not_sure' | 'cant_tell' | string;
+  color: string;
+  badge_color: string;
+  top3: Array<{
+    shot: string;
+    raw_score?: number;
+    calibrated_prob: number;
+    pct: number;
+  }>;
+  margin: number;
+  quality_factor: number;
+  caps_applied: string[];
+  reasons: string[];
+  tta_disagreement?: boolean;
+}
+
+export interface IssueCard {
+  id: string;
+  title: string;
+  where_and_when: string;
+  why_it_matters: string;
+  how_to_fix: string;
+  feel_cue: string;
+  drill: {
+    name: string;
+    instructions: string;
+  };
+  severity_label: string;
+  severity_code: 'high' | 'medium' | 'low' | string;
+  severity_color: string;
+  target_body_part: string;
+  highlight_joint: string;
+  loop_window: {
+    center_frame: number;
+    start_frame: number;
+    end_frame: number;
+    timestamp_sec?: number;
+  };
+  proof: {
+    technical_metric_name: string;
+    measured_value: number;
+    ideal_min: number;
+    ideal_max: number;
+    unit: string;
+    frame_index?: number;
+    timestamp_sec?: number;
+    measurement_confidence: number;
+    sparkline: number[];
+  };
+}
+
+export interface PlainTopSummary {
+  one_line_verdict: string;
+  technique_score: number;
+  score_label: string;
+  score_code: string;
+  one_focus_for_next_10_balls?: {
+    title: string;
+    cue: string;
+    target_body_part: string;
+    source_issue_id: string;
+  } | null;
+  what_you_did_well: Array<{
+    title: string;
+    sentence: string;
+  }>;
+  unmeasurable_notices: string[];
+}
+
 export interface AnalysisResult {
   session_id: string;
   video_filename: string;
@@ -133,16 +206,36 @@ export interface AnalysisResult {
   shot_type: string;
   predicted_shot_type?: string | null;
   prediction_confidence?: number | null;
+  shot_confidence?: ShotConfidence | null;
+  coaching_paused?: boolean;
+  pause_reason?: string | null;
+  plain_summary?: PlainTopSummary | null;
+  issue_cards?: IssueCard[];
   shot_mismatch_warning?: string | null;
   detected_camera_view?: string | null;
   camera_view_warning?: string | null;
   striker_track_id?: number | null;
+  user_selected_shot?: string | null;
+  is_uncertain?: boolean | null;
+  striker_isolation_evidence?: {
+    active_striker_id?: number;
+    role?: string;
+    confidence?: number;
+    selection_method?: string;
+    needs_confirmation?: boolean;
+    cues?: Record<string, any>;
+    all_tracks?: Record<string, any>;
+  } | null;
+  striker_tracking_status?: string | null;
+  tracking_dropout_warning?: string | null;
   metric_comparison_table?: MetricComparisonRow[];
   user_confirmed_shot_type?: string | null;
   shot_classification?: {
     predicted_shot: string;
     confidence: number;
     is_uncertain: boolean;
+    uncertainty_label?: string | null;
+    family?: string | null;
     classification_method: string;
     top_candidates: Array<{ shot_name: string; score: number }>;
     rationale: string;
@@ -194,6 +287,9 @@ export interface CricketShot {
   reference_video_url?: string | null;
   reference_thumbnail_url?: string | null;
   implementation_status: 'supported' | 'experimental' | 'in_development';
+  support_tier?: 'supported' | 'preview_only';
+  analysis_status?: 'available' | 'preview_only' | 'coming_soon';
+  status_message?: string | null;
   technique_notes?: string | null;
 }
 
@@ -334,6 +430,9 @@ export interface ClassPerformance {
 }
 
 export interface ModelEvaluationReport {
+  has_empirical_data?: boolean;
+  labeled_clips_count?: number;
+  min_required_per_shot?: number;
   model_name: string;
   architecture: string;
   dataset_name: string;
