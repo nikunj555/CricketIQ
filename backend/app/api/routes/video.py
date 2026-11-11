@@ -81,6 +81,13 @@ async def upload_video(
     striker_track_id: Optional[int] = Form(None),
     striker_tap_coords: Optional[str] = Form(None)
 ):
+    # Fail fast if server AI engine is not ready
+    if pose_service.landmarker is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Pose estimation AI engine is unavailable on the server ({pose_service.init_error or 'PoseLandmarker not loaded'}). Ensure Docker runtime with OpenGL/libGLESv2 is deployed."
+        )
+
     # Validate extension
     file_ext = Path(file.filename).suffix.lower()
     if file_ext not in settings.ALLOWED_EXTENSIONS:

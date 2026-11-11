@@ -70,6 +70,11 @@ class PhaseService:
         self.model_path = Path(model_path or settings.PHASE_MODEL_PATH)
         self.model: Optional[BiLSTMBattingPhaseClassifier] = None
         self.device = torch.device("cpu")
+        try:
+            torch.set_num_threads(1)
+            torch.set_num_interop_threads(1)
+        except Exception:
+            pass
         self._load_model()
 
     def _load_model(self):

@@ -162,6 +162,14 @@ class VideoService:
                 except Exception as e:
                     logger.warning(f"Failed to load groundtruth file {gt_file.name}: {e}")
 
+            # Fail fast if server AI engine failed to load (e.g. missing Linux OpenGL/libGLESv2)
+            if pose_service.landmarker is None:
+                err_detail = pose_service.init_error or "PoseLandmarker failed to initialize"
+                error_msg = f"AI Pose Engine is unavailable on server: {err_detail}. Verify server OpenGL/libGLESv2 libraries."
+                logger.error(error_msg)
+                session_repo.update_progress(session_id, "failed", 0.0, error_msg, error=error_msg)
+                return
+
             # -------------------------------------------------------------
             # PASS 1: Landmark & Feature Extraction (No frame caching)
             # -------------------------------------------------------------
