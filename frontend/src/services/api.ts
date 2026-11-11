@@ -76,6 +76,17 @@ export const api = {
     return res.json();
   },
 
+  async selectStriker(sessionId: string, trackId: number) {
+    const res = await apiFetch(`${API_BASE}/video/session/${sessionId}/select-striker?track_id=${trackId}`, {
+      method: 'POST',
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({ detail: 'Failed to select striker' }));
+      throw new Error(err.detail || 'Failed to select striker');
+    }
+    return res.json();
+  },
+
   async getAnalysis(sessionId: string): Promise<AnalysisResult> {
     const res = await apiFetch(`${API_BASE}/analysis/${sessionId}`);
     if (!res.ok) {

@@ -104,6 +104,11 @@ class MultiPersonTracker:
         head_ref_y = _get_v(nose, 'y', sh_y) if nose else sh_y
         is_overhead = (lw_y < head_ref_y - 0.04) or (rw_y < head_ref_y - 0.04)
 
+        # Average landmark visibility across primary body keypoints (nose, shoulders, elbows, wrists, hips, knees, ankles)
+        key_indices = [0, 11, 12, 13, 14, 15, 16, 23, 24, 25, 26, 27, 28]
+        vis_list = [_get_v(lms[idx], 'visibility', 1.0) for idx in key_indices if idx < len(lms) and lms[idx] is not None] if lms else []
+        mean_vis = float(np.mean(vis_list)) if vis_list else 0.85
+
         return {
             "frame_idx": frame_idx,
             "bbox": pose["bbox"],
@@ -115,7 +120,8 @@ class MultiPersonTracker:
             "wrist_dist": wrist_dist,
             "is_bat_grip": is_bat_grip,
             "is_in_front": is_in_front,
-            "is_overhead": is_overhead
+            "is_overhead": is_overhead,
+            "mean_vis": mean_vis
         }
 
     def update(self, detected_poses: List[Dict[str, Any]], frame_idx: int = 0) -> Dict[int, Dict[str, Any]]:
@@ -241,6 +247,10 @@ class MultiPersonTracker:
         classifications: Dict[int, Dict[str, Any]] = {}
         setup_window_limit = max(10, min(45, int(total_frames * 0.45)))
 
+        # Find maximum wrist motion energy across all tracks to separate active swing from stationary posture
+        motion_vals = [tr.get("wrist_motion_total", 0.0) for tr in self.tracks.values()]
+        max_total_wrist_motion = max(0.001, max(motion_vals)) if motion_vals else 0.001
+
         for tid, tr in self.tracks.items():
             hist = tr.get("history", [])
             if not hist:
@@ -257,6 +267,14 @@ class MultiPersonTracker:
             later_snapshots = [h for h in hist if h["frame_idx"] > setup_window_limit]
 
             # ----------------------------------------------------
+            # Cue 0: Landmark Quality & Visibility Gate
+            # ----------------------------------------------------
+            vis_hist = [h.get("mean_vis", 0.85) for h in hist]
+            track_mean_vis = float(np.mean(vis_hist)) if vis_hist else 0.85
+            is_low_quality = track_mean_vis < 0.40
+            quality_factor = 1.0 if not is_low_quality else max(0.15, track_mean_vis / 0.60)
+
+            # ----------------------------------------------------
             # Cue 1: Holds Bat-like Pose in Stationary Stance
             # ----------------------------------------------------
             bat_grip_count = sum(1 for h in setup_snapshots if h.get("is_bat_grip") and h.get("is_in_front"))
@@ -264,40 +282,42 @@ class MultiPersonTracker:
 
             setup_hip_disps = [math.hypot(h["hip"][0] - init_hip[0], h["hip"][1] - init_hip[1]) for h in setup_snapshots]
             max_setup_hip_disp = max(setup_hip_disps) if setup_hip_disps else 0.0
-            stance_stability_score = max(0.0, 1.0 - (max_setup_hip_disp / 0.10))
+            stance_stability_score = max(0.0, 1.0 - (max_setup_hip_disp / 0.12))
             cue1_bat_pose_score = float(np.clip(bat_grip_ratio * 0.60 + stance_stability_score * 0.40, 0.0, 1.0))
 
             # ----------------------------------------------------
-            # Cue 2: Position Stability at Crease End
+            # Cue 2: Position Stability at Crease End (Allows Front-foot Stride)
             # ----------------------------------------------------
             all_hip_disps = [math.hypot(h["hip"][0] - init_hip[0], h["hip"][1] - init_hip[1]) for h in hist]
             max_total_hip_disp = max(all_hip_disps) if all_hip_disps else 0.0
-            # Bowler has high translation; striker stays anchored
-            cue2_position_score = float(np.clip(1.0 - (max_total_hip_disp / 0.22), 0.0, 1.0))
+            # Bowler has high run-up translation (>0.32); striker hip stride is bounded (~0.12-0.24)
+            cue2_position_score = float(np.clip(1.0 - (max_total_hip_disp / 0.35), 0.0, 1.0))
 
             # ----------------------------------------------------
-            # Cue 3: Motion Signature (Rotational Swing vs Run-up / Overhead Arc)
+            # Cue 3: Motion Signature (Rotational Swing vs Run-up / Stationary Non-striker)
             # ----------------------------------------------------
             peak_wrist_vel = tr.get("peak_wrist_vel", 0.0)
+            total_wrist_motion = tr.get("wrist_motion_total", 0.0)
             overhead_count = sum(1 for h in hist if h.get("is_overhead"))
             has_bowling_arc = overhead_count >= 2
 
-            # Rotational swing has peak velocity without large pelvic translation
-            is_rotational_swing = (peak_wrist_vel > 0.045) and (max_total_hip_disp < 0.16)
-            is_bowler_runup = (max_total_hip_disp > 0.18) or (has_bowling_arc and max_total_hip_disp > 0.10)
-            is_still_non_striker = (peak_wrist_vel < 0.035) and (tr.get("wrist_motion_total", 0.0) < 0.35)
+            # Rotational swing has sharp peak wrist velocity without large whole-pitch translation
+            is_rotational_swing = (peak_wrist_vel > 0.038 or total_wrist_motion > 0.40) and (not has_bowling_arc) and (max_total_hip_disp < 0.28)
+            is_bowler_runup = (has_bowling_arc and max_total_hip_disp > 0.10) or (max_total_hip_disp > 0.32 and not is_rotational_swing)
+            is_still_non_striker = (peak_wrist_vel < 0.034) or (total_wrist_motion < 0.30 and peak_wrist_vel < 0.040)
 
             if is_rotational_swing:
-                cue3_motion_score = 0.90
+                cue3_motion_score = 0.95
             elif is_bowler_runup:
                 cue3_motion_score = 0.05
             elif is_still_non_striker:
-                cue3_motion_score = 0.25
+                cue3_motion_score = 0.10
+                cue1_bat_pose_score = min(cue1_bat_pose_score, 0.40)  # Non-striker just leans on handle
             else:
-                cue3_motion_score = 0.50
+                cue3_motion_score = 0.45
 
             # ----------------------------------------------------
-            # Cue 4: Temporal Order
+            # Cue 4: Temporal Order & Swing Energy
             # ----------------------------------------------------
             # Find frame of peak wrist speed
             peak_frame = hist[0]["frame_idx"]
@@ -308,24 +328,34 @@ class MultiPersonTracker:
                     best_vel = v
                     peak_frame = h["frame_idx"]
 
-            # If bowler, peak is early in delivery; if striker, peak is at impact
-            is_impact_timed = peak_frame >= int(total_frames * 0.35)
-            cue4_temporal_score = 0.85 if is_impact_timed else 0.40
+            # If bowler, peak is early in delivery; if striker, peak is at impact window
+            is_impact_timed = peak_frame >= int(total_frames * 0.30)
+            cue4_temporal_score = 0.90 if is_impact_timed else 0.40
 
-            # Weighted striker score
-            striker_score = (
-                cue1_bat_pose_score * 0.35 +
+            # Swing energy proportion relative to highest motion in frame
+            swing_energy_ratio = float(np.clip(total_wrist_motion / max_total_wrist_motion, 0.0, 1.0))
+
+            # Weighted striker score with quality gating
+            raw_striker_score = (
+                cue1_bat_pose_score * 0.25 +
                 cue3_motion_score * 0.35 +
                 cue2_position_score * 0.15 +
-                cue4_temporal_score * 0.15
+                cue4_temporal_score * 0.10 +
+                swing_energy_ratio * 0.15
             )
+            striker_score = float(np.clip(raw_striker_score * quality_factor, 0.0, 1.0))
 
             # Classify role
-            if is_bowler_runup and not is_rotational_swing:
+            if is_low_quality:
+                role = "low-confidence"
+                striker_score = min(striker_score, 0.20)
+            elif is_bowler_runup and not is_rotational_swing:
                 role = "bowler"
+                striker_score = min(striker_score, 0.25)
             elif is_still_non_striker:
                 role = "non-striker"
-            elif striker_score >= 0.50:
+                striker_score = min(striker_score, 0.35)
+            elif is_rotational_swing or striker_score >= 0.50:
                 role = "striker"
             else:
                 role = "other"
@@ -335,17 +365,21 @@ class MultiPersonTracker:
                 "cue2_position_score": round(cue2_position_score, 2),
                 "cue3_motion_score": round(cue3_motion_score, 2),
                 "cue4_temporal_score": round(cue4_temporal_score, 2),
+                "swing_energy_ratio": round(swing_energy_ratio, 2),
+                "mean_landmark_visibility": round(track_mean_vis, 2),
                 "max_hip_disp": round(max_total_hip_disp, 3),
                 "peak_wrist_vel": round(peak_wrist_vel, 3),
                 "bat_grip_ratio": round(bat_grip_ratio, 2),
                 "has_bowling_arc": has_bowling_arc,
-                "role": role
+                "role": role,
+                "bbox": tr.get("bbox")
             }
 
             classifications[tid] = {
                 "role": role,
                 "striker_score": round(striker_score, 3),
                 "confidence": round(striker_score, 2),
+                "bbox": tr.get("bbox"),
                 "evidence": evidence
             }
 

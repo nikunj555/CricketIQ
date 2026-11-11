@@ -286,6 +286,19 @@ class SessionRepository:
 
         return self.get_session(session_id)
 
+    def update_striker_track_id(self, session_id: str, track_id: int):
+        """Updates striker_track_id and resets session status to queued for re-processing."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE sessions
+                SET striker_track_id = ?,
+                    status = 'queued',
+                    progress = 0.0,
+                    current_step = 'Re-analyzing with selected striker...'
+                WHERE session_id = ?
+            """, (track_id, session_id))
+            conn.commit()
+
     def update_result(self, session_id: str, result_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Updates result_json and associated columns for a session."""
         shot_type = result_dict.get("shot_type") or "Unknown"

@@ -66,6 +66,7 @@ class ShotClassifierService:
         wrist_xs = []
         wrist_ys = []
         hip_ys = []
+        sh_ys = []
         for m in analysis_frames:
             wx = m.get("lead_wrist_x") if m.get("lead_wrist_x") is not None else m.get("bat_tip_x")
             wy = m.get("lead_wrist_y") if m.get("lead_wrist_y") is not None else m.get("bat_tip_y")
@@ -78,6 +79,10 @@ class ShotClassifierService:
                 def _gy(lm):
                     return lm.get("y", 0.0) if isinstance(lm, dict) else getattr(lm, "y", 0.0)
                 hip_ys.append((_gy(lms[23]) + _gy(lms[24])) / 2.0)
+                sh_ys.append((_gy(lms[11]) + _gy(lms[12])) / 2.0)
+
+        mean_shoulder_y = float(np.mean(sh_ys)) if sh_ys else 0.35
+        min_wrist_y = float(np.min(wrist_ys)) if wrist_ys else 0.40
 
         # Basic kinematic metrics
         min_lead_knee = float(np.min(lead_knees)) if lead_knees else 145.0
@@ -117,10 +122,21 @@ class ShotClassifierService:
             dx = 0.0
             dy = -0.5
 
-        # Bat orientations
+        # Bat orientations (in cricket, 0 deg is pointing down/vertical, 90 deg is horizontal)
         bat_angles = [m["bat_angle_deg"] for m in analysis_frames if m.get("bat_detected") and m.get("bat_angle_deg") is not None]
-        horizontal_bat_count = sum(1 for a in bat_angles if abs(a) < 40.0 or abs(a) > 140.0)
+        horizontal_bat_count = sum(1 for a in bat_angles if 45.0 <= abs(a) <= 135.0)
         horizontal_bat_ratio = horizontal_bat_count / max(1, len(bat_angles)) if bat_angles else 0.0
+
+        impact_frames = [m for m in analysis_frames if "impact" in str(m.get("phase", "")).lower()]
+        impact_bat_angles = [m["bat_angle_deg"] for m in impact_frames if m.get("bat_angle_deg") is not None]
+        impact_bat_angle = float(np.mean(impact_bat_angles)) if impact_bat_angles else (bat_angles[len(bat_angles)//2] if bat_angles else 25.0)
+
+        impact_wrist_ys = [
+            m.get("lead_wrist_y") if m.get("lead_wrist_y") is not None else m.get("bat_tip_y")
+            for m in impact_frames
+            if (m.get("lead_wrist_y") is not None or m.get("bat_tip_y") is not None)
+        ]
+        impact_wrist_y = float(np.mean(impact_wrist_ys)) if impact_wrist_ys else min_wrist_y
 
         # Stage 1: Family Decision
         family_scores: Dict[str, float] = {
@@ -133,28 +149,41 @@ class ShotClassifierService:
             "Innovative": 0.05
         }
 
-        if (w_span_x < 0.40 and w_span_y < 0.45) or (peak_wrist_speed < 0.018 and stride_ratio < 1.15):
-            family_scores["Leave / No Shot"] = 0.92
-
-        horizontal_sweep_path = horizontal_bat_ratio > 0.30 or (w_span_x >= 0.65 and abs(dx) > 0.18)
+        horizontal_sweep_path = horizontal_bat_ratio > 0.25 or (w_span_x >= 0.40 and abs(dx) > 0.15) or abs(impact_bat_angle) > 35.0
         is_kneeling = (
-            min_rear_knee < 128.0 and pelvis_drop >= 0.12 and horizontal_sweep_path
-        ) or (min_rear_knee < 108.0 and pelvis_drop >= 0.12)
+            min_rear_knee < 128.0 and (pelvis_drop >= 0.08 or min_rear_knee < 112.0)
+        )
         if is_kneeling:
-            family_scores["Sweep"] = 0.91
+            family_scores["Sweep"] = 0.95
 
-        is_compact_swing = (stride_ratio < 1.25 and w_span_y < 0.70 and peak_wrist_speed < 0.038)
-        if is_compact_swing and not is_kneeling and family_scores["Leave / No Shot"] < 0.50:
-            family_scores["Defensive"] = 0.88
+        is_leave = (
+            (w_span_x < 0.35 and w_span_y < 0.40 and peak_wrist_speed < 0.028) or
+            (peak_wrist_speed < 0.020 and stride_ratio < 1.15)
+        ) and not is_kneeling
+        if is_leave:
+            family_scores["Leave / No Shot"] = 0.94
 
-        if (stride_ratio < 1.25 or horizontal_bat_ratio > 0.30) and not is_kneeling and not is_compact_swing:
-            family_scores["Cross-bat"] = 0.87
+        is_compact_swing = (stride_ratio < 1.25 and w_span_y < 0.70 and peak_wrist_speed < 0.038) or (
+            stride_ratio >= 1.20 and peak_wrist_speed < 0.040 and abs(impact_bat_angle) < 32.0 and dy > -0.55
+        )
+        if is_compact_swing and not is_kneeling and not is_leave:
+            family_scores["Defensive"] = 0.90
 
-        if stride_ratio >= 1.25 and not is_kneeling and not is_compact_swing:
-            family_scores["Drive"] = 0.89
+        # Cross-bat: back-foot transfer (stride_ratio < 1.25, tall lead knee, upright torso) or horizontal bat at impact
+        is_cross_bat = (
+            (stride_ratio < 1.25 and (min_lead_knee > 142.0 or abs(impact_bat_angle) >= 35.0))
+            and not is_kneeling and not is_compact_swing
+        )
+        if is_cross_bat:
+            family_scores["Cross-bat"] = 0.92
 
-        if dx < -0.25 and stride_ratio > 1.15 and not is_kneeling:
-            family_scores["Leg-side"] = 0.83
+        # Drive: front-foot stride (stride_ratio >= 1.20), flexed lead knee, steep vertical bat at impact
+        is_drive = (stride_ratio >= 1.20 and min_lead_knee <= 142.0 and not is_kneeling and not is_compact_swing and not is_cross_bat)
+        if is_drive:
+            family_scores["Drive"] = 0.92
+
+        if dx < -0.30 and stride_ratio > 1.15 and not is_kneeling and not is_cross_bat:
+            family_scores["Leg-side"] = 0.85
 
         top_family = max(family_scores.keys(), key=lambda k: family_scores[k])
 
@@ -167,16 +196,16 @@ class ShotClassifierService:
             candidate_scores["Unrecognised Shot"] = 0.35
 
         elif top_family == "Sweep":
-            if dx > 0.40:
-                candidate_scores["Reverse Sweep"] = 0.89
+            if dx > 0.35:
+                candidate_scores["Reverse Sweep"] = 0.90
                 candidate_scores["Sweep"] = 0.72
                 candidate_scores["Paddle Sweep"] = 0.65
             elif max_torso_lean > 26.0 and w_span_y > 0.90:
-                candidate_scores["Slog Sweep"] = 0.88
+                candidate_scores["Slog Sweep"] = 0.89
                 candidate_scores["Sweep"] = 0.80
                 candidate_scores["Paddle Sweep"] = 0.68
             elif dx < -0.25:
-                candidate_scores["Paddle Sweep"] = 0.86
+                candidate_scores["Paddle Sweep"] = 0.88
                 candidate_scores["Sweep"] = 0.78
                 candidate_scores["Slog Sweep"] = 0.60
             else:
@@ -185,33 +214,50 @@ class ShotClassifierService:
                 candidate_scores["Paddle Sweep"] = 0.72
 
         elif top_family == "Defensive":
-            if stride_ratio >= 1.25:
-                candidate_scores["Forward Defensive"] = 0.89
+            if stride_ratio >= 1.20:
+                candidate_scores["Forward Defensive"] = 0.90
                 candidate_scores["Back-foot Defensive"] = 0.62
                 candidate_scores["Straight Drive"] = 0.52
             else:
-                candidate_scores["Back-foot Defensive"] = 0.88
+                candidate_scores["Back-foot Defensive"] = 0.89
                 candidate_scores["Forward Defensive"] = 0.64
                 candidate_scores["Back-foot Punch"] = 0.55
 
         elif top_family == "Cross-bat":
-            if dx > 0.20:
-                candidate_scores["Square Cut"] = 0.89
+            is_high_hook = (impact_wrist_y <= mean_shoulder_y + 0.05)
+            has_bat = len(bat_angles) > 0
+            is_punch = (has_bat and horizontal_bat_ratio < 0.20 and abs(impact_bat_angle) < 40.0) or (not has_bat and w_span_x < 0.20 and dy > 0.30)
+            is_late_cut = (has_bat and dx <= 0.05 and abs(impact_bat_angle) > 35.0 and dy > 0.10)
+            is_side_on = not any(v in camera_view.lower() for v in ["front", "behind", "pitch", "bowler"])
+
+            is_pull_or_hook = (
+                (is_side_on and (dx >= 0.45 or dx <= -0.25 or (abs(dx) >= 0.25 and dy <= 0.10))) or
+                (not is_side_on and dx < -0.15)
+            )
+
+            if is_punch:
+                candidate_scores["Back-foot Punch"] = 0.90
+                candidate_scores["Square Cut"] = 0.72
+                candidate_scores["Pull Shot"] = 0.65
+            elif is_late_cut:
+                candidate_scores["Late Cut"] = 0.89
+                candidate_scores["Square Cut"] = 0.76
+                candidate_scores["Back-foot Punch"] = 0.68
+            elif is_pull_or_hook:
+                # In horizontal cross-bat swing across to on-side, pull/hook dominates
+                if is_high_hook:
+                    candidate_scores["Hook Shot"] = 0.90
+                    candidate_scores["Pull Shot"] = 0.78
+                    candidate_scores["Square Cut"] = 0.58
+                else:
+                    candidate_scores["Pull Shot"] = 0.90
+                    candidate_scores["Hook Shot"] = 0.76
+                    candidate_scores["Square Cut"] = 0.62
+            else:
+                candidate_scores["Square Cut"] = 0.90
                 candidate_scores["Late Cut"] = 0.76
                 candidate_scores["Back-foot Punch"] = 0.70
                 candidate_scores["Pull Shot"] = 0.60
-            elif dx < -0.20:
-                candidate_scores["Pull Shot"] = 0.89
-                candidate_scores["Hook Shot"] = 0.80
-                candidate_scores["Square Cut"] = 0.60
-            elif min_lead_knee > 146.0 and mean_torso_lean < 14.0:
-                candidate_scores["Pull Shot"] = 0.89
-                candidate_scores["Hook Shot"] = 0.82
-                candidate_scores["Square Cut"] = 0.68
-            else:
-                candidate_scores["Square Cut"] = 0.88
-                candidate_scores["Back-foot Punch"] = 0.76
-                candidate_scores["Pull Shot"] = 0.72
 
         elif top_family == "Leg-side":
             if dx < -0.40:
@@ -231,10 +277,12 @@ class ShotClassifierService:
                 is_cover = dx > 0.08
                 is_off_drive = 0.02 < dx <= 0.08
             else:
-                is_straight = (abs(dx) <= 0.06 and w_span_x < 0.25) or (dy <= -1.15 and w_span_y > 1.75) or (abs(dx) <= 0.03)
-                is_on_drive = (dx < -0.35 and dy > -0.70)
-                is_cover = not is_straight and not is_on_drive
-                is_off_drive = False
+                # Side-on view:
+                # Straight Drive: compact vertical pendulum down pitch (abs(impact_bat_angle) <= 18.0 or dx <= 0.75)
+                is_straight = (abs(impact_bat_angle) <= 18.0 and dx <= 0.75) or (w_span_x < 0.25)
+                is_on_drive = (dx < -0.25 and dy > -0.70)
+                is_cover = not is_straight and not is_on_drive and (dx > 0.75 or abs(impact_bat_angle) > 18.0)
+                is_off_drive = not is_straight and not is_on_drive and not is_cover
 
             if is_straight:
                 candidate_scores["Straight Drive"] = 0.90
@@ -246,15 +294,15 @@ class ShotClassifierService:
                 candidate_scores["Straight Drive"] = 0.76
                 candidate_scores["Flick Shot"] = 0.70
                 candidate_scores["Cover Drive"] = 0.58
+            elif is_off_drive:
+                candidate_scores["Off Drive"] = 0.89
+                candidate_scores["Cover Drive"] = 0.80
+                candidate_scores["Straight Drive"] = 0.78
             elif is_cover:
                 candidate_scores["Cover Drive"] = 0.89
-                candidate_scores["Off Drive"] = 0.80
+                candidate_scores["Off Drive"] = 0.78
                 candidate_scores["Straight Drive"] = 0.68
                 candidate_scores["Square Drive"] = 0.62
-            elif is_off_drive:
-                candidate_scores["Off Drive"] = 0.88
-                candidate_scores["Cover Drive"] = 0.80
-                candidate_scores["Straight Drive"] = 0.76
             else:
                 candidate_scores["Cover Drive"] = 0.86
                 candidate_scores["Straight Drive"] = 0.82

@@ -145,6 +145,27 @@ def get_processing_status(session_id: str):
         error=session["error"]
     )
 
+@router.post("/session/{session_id}/select-striker")
+def select_striker_endpoint(
+    session_id: str,
+    track_id: int,
+    background_tasks: BackgroundTasks
+):
+    """
+    Overrides the striker track for an existing video session and triggers re-processing.
+    """
+    session = session_repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+    session_repo.update_striker_track_id(session_id, track_id)
+    background_tasks.add_task(video_service.process_video_session, session_id)
+    return {
+        "session_id": session_id,
+        "striker_track_id": track_id,
+        "message": f"Striker track locked to #{track_id}. Re-processing video session..."
+    }
+
 @router.get("/original/{filename}")
 def get_original_video(filename: str):
     path = settings.UPLOADS_DIR / filename

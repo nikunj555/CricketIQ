@@ -215,6 +215,15 @@ export interface AnalysisResult {
   detected_camera_view?: string | null;
   camera_view_warning?: string | null;
   striker_track_id?: number | null;
+  striker_candidates?: Array<{
+    track_id: number;
+    bbox: number[];
+    is_selected: boolean;
+    role: string;
+    confidence: number;
+    striker_score: number;
+    is_default: boolean;
+  }>;
   user_selected_shot?: string | null;
   is_uncertain?: boolean | null;
   striker_isolation_evidence?: {

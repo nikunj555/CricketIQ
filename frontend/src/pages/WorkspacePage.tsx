@@ -18,7 +18,8 @@ import {
   Edit3,
   Dumbbell,
   Columns,
-  Zap
+  Zap,
+  Loader2
 } from 'lucide-react';
 import { AnalysisResult, SessionListItem, NavTab } from '../types/cricket';
 import { api } from '../services/api';
@@ -72,6 +73,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
   const [comparisonType, setComparisonType] = useState<'3d' | 'blueprint'>('3d');
   const [activeMistakeJoint, setActiveMistakeJoint] = useState<string | null>(null);
   const [hasEnded, setHasEnded] = useState<boolean>(false);
+  const [isSwitchingStriker, setIsSwitchingStriker] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const syncedVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -155,6 +157,35 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
       alert(`Failed to re-analyse as ${targetShot}: ${err.message}`);
     } finally {
       setIsConfirmingShot(false);
+    }
+  };
+
+  const handleSelectStriker = async (trackId: number) => {
+    if (!analysis) return;
+    try {
+      setIsSwitchingStriker(true);
+      await api.selectStriker(analysis.session_id, trackId);
+      let attempts = 0;
+      const interval = setInterval(async () => {
+        attempts++;
+        try {
+          const status = await api.getProcessingStatus(analysis.session_id);
+          if (status.status === 'completed') {
+            clearInterval(interval);
+            await loadSession(analysis.session_id);
+            setIsSwitchingStriker(false);
+          } else if (status.status === 'failed' || attempts > 60) {
+            clearInterval(interval);
+            setIsSwitchingStriker(false);
+            alert(`Re-processing failed: ${status.error || 'Timeout'}`);
+          }
+        } catch {
+          // ignore transient poll error
+        }
+      }, 1000);
+    } catch (err: any) {
+      alert(`Failed to switch striker: ${err.message}`);
+      setIsSwitchingStriker(false);
     }
   };
 
@@ -920,19 +951,89 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
         </div>
       )}
 
-      {/* Striker Isolation Status */}
+      {/* Striker Isolation & Manual Override */}
       {analysis.striker_isolation_evidence && (
-        <div className="p-3 rounded-xl bg-[#111315] border border-[#303438] flex flex-wrap items-center justify-between gap-3 text-xs">
-          <div className="flex items-center space-x-2">
-            <span className="w-2.5 h-2.5 rounded-full bg-[#7FEA35] animate-pulse"></span>
-            <span className="font-bold text-white">
-              Striker Isolation: Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id} Locked
-            </span>
-            <span className="text-[11px] text-[#A5A9AD]">
-              (Bowler & non-strikers excluded across all analysis)
-            </span>
+        <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-3 text-xs">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center space-x-2">
+              <span className={`w-2.5 h-2.5 rounded-full ${
+                (analysis.striker_isolation_evidence.confidence ?? 0.85) < 0.40
+                  ? 'bg-amber-400 animate-ping'
+                  : 'bg-[#7FEA35] animate-pulse'
+              }`}></span>
+              <span className="font-bold text-white text-sm">
+                Striker: Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id}{' '}
+                <span className="font-normal text-xs text-[#A5A9AD]">
+                  ({analysis.striker_isolation_evidence.selection_method === 'user_specified_track'
+                    ? 'User Selected'
+                    : `Auto-detected: ${Math.round((analysis.striker_isolation_evidence.confidence ?? 0.85) * 100)}% confidence`})
+                </span>
+              </span>
+            </div>
+            {isSwitchingStriker && (
+              <div className="flex items-center space-x-1.5 text-xs text-[#7FEA35]">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                <span>Re-analyzing with chosen batter...</span>
+              </div>
+            )}
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono">
+
+          {(analysis.striker_isolation_evidence.confidence ?? 0.85) < 0.40 ? (
+            <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-600/50 text-amber-200 flex items-center space-x-2">
+              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
+              <span>No clear striker detected — please select the batter manually from the candidates below.</span>
+            </div>
+          ) : (
+            <p className="text-[11px] text-[#A5A9AD]">
+              Bowler and non-strikers are excluded from kinematic analysis. Skeleton tracking is locked onto Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id}.
+            </p>
+          )}
+
+          {/* Candidate Tracks Override Buttons */}
+          {((analysis.striker_candidates && analysis.striker_candidates.length > 1) ||
+            (analysis.striker_isolation_evidence.all_tracks && Object.keys(analysis.striker_isolation_evidence.all_tracks).length > 1)) && (
+            <div className="space-y-1.5 pt-1 border-t border-[#303438]/60">
+              <span className="text-[11px] font-medium text-[#A5A9AD] block">
+                Detected People in Frame (Click a person to lock tracking onto them):
+              </span>
+              <div className="flex flex-wrap gap-2">
+                {(analysis.striker_candidates || Object.entries(analysis.striker_isolation_evidence.all_tracks || {}).map(([tid, meta]: [string, any]) => ({
+                  track_id: Number(tid),
+                  role: meta.role || 'other',
+                  confidence: meta.confidence || 0.5,
+                  striker_score: meta.striker_score || 0.0,
+                  is_selected: Number(tid) === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id)
+                }))).map((cand: any) => {
+                  const isActive = cand.track_id === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id);
+                  return (
+                    <button
+                      key={cand.track_id}
+                      type="button"
+                      onClick={() => !isActive && !isSwitchingStriker && handleSelectStriker(cand.track_id)}
+                      disabled={isActive || isSwitchingStriker}
+                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
+                        isActive
+                          ? 'bg-[#7FEA35]/15 border-2 border-[#7FEA35] text-[#7FEA35] font-bold shadow'
+                          : 'bg-[#181B1D] border border-[#303438] text-[#F5F5F5] hover:border-[#7FEA35]/60 hover:text-white'
+                      }`}
+                    >
+                      <span>
+                        Person #{cand.track_id} ({cand.role.toUpperCase()})
+                      </span>
+                      {isActive ? (
+                        <span className="text-[10px] px-1 py-0.2 rounded bg-[#7FEA35] text-black font-bold">LOCKED</span>
+                      ) : (
+                        <span className="text-[10px] text-[#A5A9AD]">Select</span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          {/* Biomechanical Cues Snapshot */}
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono pt-1">
             <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
               Bat Pose Stance: {analysis.striker_isolation_evidence.cues?.cue1_bat_pose_score != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue1_bat_pose_score * 100)}%` : 'Verified'}
             </span>

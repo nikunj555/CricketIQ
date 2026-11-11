@@ -732,6 +732,22 @@ class VideoService:
                 "detected_camera_view": detected_view
             }
 
+            # Assemble candidate tracks for manual UI override
+            striker_candidates = []
+            for tid, meta in track_classifications.items():
+                t_bbox = [0.0, 0.0, 1.0, 1.0]
+                if tid in tracker.tracks:
+                    t_bbox = tracker.tracks[tid].get("bbox", [0.0, 0.0, 1.0, 1.0])
+                striker_candidates.append({
+                    "track_id": tid,
+                    "bbox": t_bbox,
+                    "is_selected": (tid == active_striker_id),
+                    "role": meta.get("role", "other"),
+                    "confidence": meta.get("confidence", 0.5),
+                    "striker_score": meta.get("striker_score", 0.0),
+                    "is_default": (tid == best_tid),
+                })
+
             result_dict = {
                 "session_id": session_id,
                 "video_filename": input_path.name,
@@ -746,6 +762,7 @@ class VideoService:
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
+                "striker_candidates": striker_candidates,
                 "striker_isolation_evidence": {
                     "active_striker_id": active_striker_id,
                     "role": striker_meta.get("role", "striker"),
@@ -877,5 +894,13 @@ class VideoService:
                 temp_out.unlink()
         except Exception as e:
             logger.warning(f"Could not transcode {video_path} to H.264: {e}")
+
+    def override_striker(self, session_id: str, track_id: int):
+        """
+        Updates the selected striker track for this session and re-runs video processing.
+        """
+        session_repo.update_striker_track_id(session_id, track_id)
+        self.process_video_session(session_id)
+        return session_repo.get_session(session_id)
 
 video_service = VideoService()
