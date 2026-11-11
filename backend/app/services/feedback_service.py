@@ -3,8 +3,25 @@ import numpy as np
 from typing import List, Dict, Any, Optional, Tuple
 from backend.app.schemas.analysis import CoachingObservation
 from backend.app.services.reference_service import reference_service
+from backend.app.services.plain_language_service import plain_language_service
 
 logger = logging.getLogger(__name__)
+
+class EvaluationResult(tuple):
+    """
+    Tuple subclass representing technique evaluation results.
+    Unpacks as (overall_score, top_mistakes, all_observations) for backward compatibility,
+    while exposing plain_summary and issue_cards.
+    """
+    def __new__(cls, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None):
+        return super().__new__(cls, (overall_score, top_mistakes, all_observations))
+
+    def __init__(self, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None):
+        self.overall_score = overall_score
+        self.top_mistakes = top_mistakes
+        self.all_observations = all_observations
+        self.plain_summary = plain_summary or {}
+        self.issue_cards = issue_cards or []
 
 # Phase importance weights for overall technique scoring
 PHASE_WEIGHTS = {
@@ -76,15 +93,14 @@ class FeedbackService:
         phases: List[Dict[str, Any]],
         summary: Dict[str, Any],
         shot_type: str = "Cover Drive",
-        camera_view: str = "side-on"
+        camera_view: str = "side-on",
+        lang: str = "en"
     ) -> Tuple[float, List[CoachingObservation], List[CoachingObservation]]:
         """
         Compares measured values against reference_shots.json for the specified shot.
         
         Returns:
-            overall_score: float (0 - 100)
-            top_mistakes: List[CoachingObservation] (max 3 prioritized errors)
-            all_observations: List[CoachingObservation] (full list including strengths)
+            EvaluationResult(overall_score, top_mistakes, all_observations, plain_summary, issue_cards)
         """
         canonical_shot = reference_service.canonicalize_shot_name(shot_type)
         is_available = reference_service.is_shot_analysis_available(canonical_shot)
@@ -112,10 +128,26 @@ class FeedbackService:
             smoothness = float(summary.get("movement_smoothness") or 80.0)
             tracking = float(summary.get("tracking_success_rate") or 85.0)
             baseline_score = round(0.5 * smoothness + 0.5 * min(100.0, tracking), 1)
-            return baseline_score, [coming_soon_obs], [coming_soon_obs]
+            plain_sum = plain_language_service.compose_top_summary(
+                shot_name=canonical_shot,
+                technique_score=baseline_score,
+                issue_cards=[],
+                measured_strengths=[],
+                unmeasurable_items=[],
+                lang=lang
+            )
+            return EvaluationResult(baseline_score, [coming_soon_obs], [coming_soon_obs], plain_summary=plain_sum, issue_cards=[])
 
         if not time_series:
-            return 70.0, [], []
+            plain_sum = plain_language_service.compose_top_summary(
+                shot_name=canonical_shot,
+                technique_score=70.0,
+                issue_cards=[],
+                measured_strengths=[],
+                unmeasurable_items=[],
+                lang=lang
+            )
+            return EvaluationResult(70.0, [], [], plain_summary=plain_sum, issue_cards=[])
 
         shot_ref = reference_service.get_shot_reference(canonical_shot) or {}
         shot_drills = shot_ref.get("drills", [])
@@ -155,6 +187,7 @@ class FeedbackService:
         # 2. Evaluate metrics across phases against reference_shots.json
         candidate_mistakes: List[Dict[str, Any]] = []
         strength_observations: List[CoachingObservation] = []
+        unmeasurable_items: List[str] = []
         total_penalty = 0.0
 
         # Define metrics to check per phase
@@ -177,6 +210,8 @@ class FeedbackService:
                 validity = "MEASURED"
                 if camera_view == "front-on" and "knee" in metric_key:
                     validity = "UNAVAILABLE"
+                    if "camera_view_knee" not in unmeasurable_items:
+                        unmeasurable_items.append("camera_view_knee")
                 elif camera_view == "oblique" and "knee" in metric_key:
                     validity = "ESTIMATED"
 
@@ -333,8 +368,42 @@ class FeedbackService:
                 confidence=0.92
             ))
 
+        # Generate Plain-English Issue Cards
+        issue_cards: List[Dict[str, Any]] = []
+        for idx, m in enumerate(top_mistake_candidates):
+            card = plain_language_service.compose_issue_card(
+                metric_key=m["metric_key"],
+                measured_val=m["measured_val"],
+                min_ideal=m["min_ideal"],
+                max_ideal=m["max_ideal"],
+                phase=m["phase"],
+                shot_name=canonical_shot,
+                frame_index=m["frame_index"],
+                timestamp_sec=m["timestamp_sec"],
+                confidence=m["confidence"],
+                severity_rank=idx,
+                time_series=time_series,
+                lang=lang
+            )
+            issue_cards.append(card)
+
+        # Strengths for plain summary
+        measured_strengths = []
+        for st in strength_observations:
+            metric_tag = "high_elbow" if "elbow" in st.id.lower() else ("knee_flex" if "knee" in st.id.lower() else "balanced_base")
+            measured_strengths.append({"key": metric_tag, "title": st.title})
+
+        plain_summary = plain_language_service.compose_top_summary(
+            shot_name=canonical_shot,
+            technique_score=overall_score,
+            issue_cards=issue_cards,
+            measured_strengths=measured_strengths,
+            unmeasurable_items=unmeasurable_items,
+            lang=lang
+        )
+
         all_observations = top_mistakes + strength_observations
-        return overall_score, top_mistakes, all_observations
+        return EvaluationResult(overall_score, top_mistakes, all_observations, plain_summary=plain_summary, issue_cards=issue_cards)
 
     @classmethod
     def generate_coaching_feedback(

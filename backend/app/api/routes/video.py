@@ -52,7 +52,9 @@ async def inspect_strikers_endpoint(
                 bbox=c["bbox"],
                 is_default=c["is_default"],
                 role=c["role"],
-                wrist_motion_score=c["wrist_motion_score"]
+                wrist_motion_score=c["wrist_motion_score"],
+                confidence=c.get("confidence"),
+                evidence=c.get("evidence")
             )
             for c in inspect_data.get("candidates", [])
         ]
@@ -63,7 +65,8 @@ async def inspect_strikers_endpoint(
             total_persons=inspect_data.get("total_persons", len(candidates)),
             frame_width=inspect_data.get("frame_width", 640),
             frame_height=inspect_data.get("frame_height", 480),
-            frame_0_data_url=frame0_b64
+            frame_0_data_url=frame0_b64,
+            needs_confirmation=inspect_data.get("needs_confirmation", False)
         )
     finally:
         temp_path.unlink(missing_ok=True)
@@ -141,6 +144,27 @@ def get_processing_status(session_id: str):
         current_step=session["current_step"],
         error=session["error"]
     )
+
+@router.post("/session/{session_id}/select-striker")
+def select_striker_endpoint(
+    session_id: str,
+    track_id: int,
+    background_tasks: BackgroundTasks
+):
+    """
+    Overrides the striker track for an existing video session and triggers re-processing.
+    """
+    session = session_repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session '{session_id}' not found.")
+
+    session_repo.update_striker_track_id(session_id, track_id)
+    background_tasks.add_task(video_service.process_video_session, session_id)
+    return {
+        "session_id": session_id,
+        "striker_track_id": track_id,
+        "message": f"Striker track locked to #{track_id}. Re-processing video session..."
+    }
 
 @router.get("/original/{filename}")
 def get_original_video(filename: str):

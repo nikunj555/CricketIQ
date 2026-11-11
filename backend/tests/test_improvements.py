@@ -158,12 +158,12 @@ def test_feedback_provenance_labels():
 
 
 def test_virat_kohli_test_video_clip_and_session():
-    """Verify that the Virat Kohli video clip exists in storage/uploads and decodes properly."""
+    """Verify that the benchmark cover drive video clip exists and decodes properly."""
     import cv2
     from backend.app.repositories.session_repository import session_repo
 
-    video_path = Path("storage/uploads/virat_kohli_cover_drive.mp4")
-    assert video_path.exists(), "virat_kohli_cover_drive.mp4 must exist in storage/uploads/"
+    video_path = Path("backend/tests/fixtures/cover_drive.mp4")
+    assert video_path.exists(), "cover_drive.mp4 must exist in backend/tests/fixtures/"
 
     cap = cv2.VideoCapture(str(video_path))
     assert cap.isOpened(), "Virat Kohli test video must be openable by OpenCV"
@@ -174,13 +174,8 @@ def test_virat_kohli_test_video_clip_and_session():
     assert total_frames > 30, f"Expected > 30 frames, got {total_frames}"
     assert fps > 20.0, f"Expected FPS > 20, got {fps}"
 
-    # Verify injected test session
+    # Verify that fake seeded sessions are not injected into the database
     session = session_repo.get_session("virat_kohli_cover_drive")
-    assert session is not None, "virat_kohli_cover_drive session must be present in database"
-    assert session["status"] == "completed"
-    assert session["shot_type"] == "Cover Drive"
-    assert "result" in session
-    assert len(session["result"]["phases"]) > 0
-    assert len(session["result"]["coaching_feedback"]) > 0
+    assert session is None, "virat_kohli_cover_drive seeded session must NOT be injected into database"
 
 

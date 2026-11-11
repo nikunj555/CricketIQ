@@ -146,11 +146,16 @@ def test_d_shot_classification_and_manual_confirmation():
     pull_seq = []
     for i in range(25):
         pull_seq.append({
-            "lead_knee_angle": 155.0,
+            "lead_knee_angle": 145.0,
             "rear_knee_angle": 128.0, # deep back foot flexion
-            "stance_width_ratio": 1.1,
-            "torso_inclination": 12.0, # upright torso
+            "stance_width_norm": 1.1,
+            "torso_inclination": 16.0, # upright torso
             "wrist_separation": 0.35,
+            "lead_wrist_speed": 0.05,
+            "lead_wrist_x": 0.45 - i * 0.005,
+            "lead_wrist_y": 0.60 - i * 0.015,
+            "bat_detected": True,
+            "bat_angle_deg": 20.0,
             "phase": "Impact window" if i == 12 else "Execution",
             "pose_detected": True,
             "confidence": 0.95

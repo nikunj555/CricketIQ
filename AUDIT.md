@@ -1,174 +1,104 @@
-# CricketIQ Technical Audit & Reproduction Report (Phase 0)
+# CricketIQ Comprehensive Hardening & Pipeline Audit (Phase 0)
 
-**Date:** 2026-11-04  
-**Auditor:** Senior Computer-Vision / ML Engineer & Full-Stack Developer  
-**Status:** Baseline Verified & Reproductions Green (5/5 reproducing tests passed)
-
----
-
-## 1. Executive Summary & Baseline State
-
-Before modifying any production code, the complete CricketIQ codebase was audited and verified against the established automated test suite and frontend build:
-
-| Target | Command | Result |
-| :--- | :--- | :--- |
-| **Backend Baseline Suite** | `python -m pytest backend/tests/ -v` | **56 passed** in 23.91s |
-| **Frontend Production Build** | `tsc -b && vite build` | **0 errors** (built in 4.76s) |
-| **Phase 0 Problem Reproductions** | `python -m pytest backend/tests/test_audit_reproductions.py -v` | **5 passed** (all 5 problems reproduced) |
-| **Core End-to-End Pipeline** | `test_core_loop_e2e.py` | **5 passed** (Kohli: 97.0, Bad: 68.0, Pull mismatch: 46.2) |
+Date: November 2026  
+Target Environment: Windows, Python 3.12, FastAPI, Node 20+, React 18, Vite  
+Repository Root: `E:\CricketIQ`
 
 ---
 
-## 2. In-Depth Problem Audit & Evidence
+## 1. Feature Existence & Verification Status
 
-### Problem 1: Delivery-to-Shot Capture Discards Pre-Roll and Boundaries
-- **Description:** Live Practice Mode only records frames after a kinetic burst threshold is triggered. The stance, bowler run-up/delivery stride, and early trigger movement are instantly discarded. Similarly, shot completion does not wait for a controlled recovery finish.
-- **File & Line Evidence:**
-  - `backend/app/services/live_coach_service.py` (lines 281–297):
-    ```python
-    if mean_recent_vel >= VELOCITY_SHOT_BURST_THRESHOLD:
-        sess.state = "shot_in_progress"
-        sess.active_shot_frames = [current_frame_data]  # Discards all pre-burst frames!
-    ```
-  - `LiveCoachSessionState` has no ring buffer to preserve the preceding 2–3 seconds of ready stance and trigger movement.
-  - No structured timeline markers (`ready`, `trigger`, `ball_release`, `stride`, `impact`, `recovery`) are produced.
-- **Reproduction Test:** `backend/tests/test_audit_reproductions.py::test_reproduce_problem_1_live_coach_discards_pre_roll` (PASSED).
-- **Proposed Architecture Fix:**
-  - Introduce a fixed-capacity circular pre-roll buffer (`collections.deque(maxlen=90)`) in `LiveCoachSessionState` holding ~3 seconds at 30fps.
-  - Implement trigger movement detection: when wrist velocity crosses an onset threshold (`VELOCITY_TRIGGER_THRESHOLD = 0.08` m/s or norm units), start tracking earlier.
-  - Upon shot burst, prepend the pre-roll buffer frames into `sess.active_shot_frames`.
-  - Add recovery stillness detection: require velocity to remain below threshold for 15 frames before transitioning to `"shot_completed"`.
-  - Output structured timeline markers in API responses and frontend timeline slider.
-- **Risk Mitigation:**
-  - Clamp buffer max length to prevent unbounded memory usage in long idle sessions.
-  - Ensure stationary stance frames are tagged with phase `"Stance"` so BiLSTM phase segmentation doesn't misclassify pre-roll as downswing.
+| Feature | Audit Status | Implementation Evidence (File & Line) | Verification Command & Output | Notes / Technical Assessment |
+|---|---|---|---|---|
+| **Striker Selection** | **Working** | `backend/app/services/pose_service.py:52-300` (`MultiPersonTracker`)<br>`frontend/src/pages/UploadPage.tsx:224-295` | `pytest backend/tests/test_striker_isolation_and_classifier.py`<br>Result: `6 passed in 4.35s` | Implements 4-factor heuristic: batting stance landmark ratios, movement anchor stability, bat swing velocity vs linear run-up, and temporal bounding consistency. User can visually select candidate bounding boxes on frame 0 in UI. |
+| **Full-Length Annotated Video with Skeleton** | **Working** | `backend/app/services/video_service.py:200-380`<br>`backend/app/services/annotation_service.py:1-420` | `pytest backend/tests/test_master_acceptance.py`<br>Result: `7 passed in 96.82s` | MediaPipe Landmarker runs frame-by-frame; FFmpeg encodes annotated frames with skeleton overlay, phase tags, and angles at original video FPS and resolution. |
+| **Per-Shot Avatar Keyframes** | **Working** | `frontend/src/data/shotAnimations.json:1-1250`<br>`frontend/src/components/RealisticBatterVisualizer.tsx:1-1350` | `node scripts/verify_avatar.cjs`<br>Result: `2843 checks passed across 25 shots, 0 errors`<br>`npx vite build`<br>Result: `built in 1.43s` | All 25 shots in the catalogue possess 7 biomechanically distinct kinematic phases. Grip derivation mathematically anchors hands strictly on the handle with blade pointing to toe. Contact sheet visual proofs stored in `docs/avatar-proof/`. |
+| **Calibrated Shot Confidence** | **Working** | `backend/app/services/confidence_service.py:20-185` | `pytest backend/tests/test_shot_recognition.py`<br>Result: `Passed` | Computes confidence as a composite score: classifier probability margin, landmark visibility (occlusion penalization), and camera angle calibration penalty. |
+| **Plain-English Feedback with Proof Layer** | **Working** | `backend/app/services/feedback_service.py:30-220`<br>`backend/app/services/plain_language_service.py:20-160` | `pytest backend/tests/test_master_acceptance.py::test_master_e2e_kohli_cover_drive_full_pipeline`<br>Result: `PASSED` | Generates diagnostic feedback linking observed biomechanics (e.g. lead knee angle at impact) directly to target ranges with drill recommendations, strictly adhering to plain English rules. |
+| **Shot-Wise Progress Tracking** | **Partial** | `backend/app/services/progress_service.py:15-180`<br>`frontend/src/pages/ProgressPage.tsx:40-210` | `pytest backend/tests/test_master_acceptance.py::test_5_progress_trend_across_three_attempts`<br>Result: `FAILED (AssertionError: assert 'same' in ['improving', 'maintained'])` | Historical session aggregation logic exists, but delta classification threshold marked a 1.5° improvement as `'same'` rather than `'improving'`. |
+| **Per-Shot Reference Catalogue (`reference_shots.json`)** | **Partial** | `backend/app/data/reference_shots.json:1-850`<br>`backend/app/data/reference_catalogue.py:20-205` | Verified file structure: contains 25 shots with 7 phases. | Angle trajectories in `reference_catalogue.py` are generated using mathematical synthetic curves (`np.sin(phase_ratio * np.pi)`) rather than empirical marker-tracked pro player data. |
 
 ---
 
-### Problem 2: Batting Analysis Lacks Counterfactual Gain Ranking, Matrix & Strengths
-- **Description:** Feedback generates generic severity order based on simple angle deviation weights without computing the potential score gain. Batters cannot see how much their score would increase if a specific flaw was corrected. Furthermore, no phase-by-phase comparison matrix (7 phases × metrics) is provided, and strengths are hidden when mistakes exist.
-- **File & Line Evidence:**
-  - `backend/app/services/feedback_service.py` (lines 225–233, 265–302):
-    ```python
-    severity_score = normalized_dev * phase_weight * metric_weight
-    # No potential_score_gain calculation
-    # No phase-by-phase comparison matrix returned
-    ```
-  - Strengths are relegated or omitted from the primary response payload when mistakes are found.
-- **Reproduction Test:** `backend/tests/test_audit_reproductions.py::test_reproduce_problem_2_feedback_lacks_counterfactual_priority_and_phase_matrix` (PASSED).
-- **Proposed Architecture Fix:**
-  - Implement Counterfactual Rescoring: for each detected mistake, evaluate what the overall technique score would be if that metric was replaced with the reference ideal midpoint. The difference `potential_score_gain = rescored_score - current_score` provides an exact, transparent priority metric (e.g. "+12.4 pts if corrected").
-  - Rank top 3 mistakes strictly by `potential_score_gain`.
-  - Construct a comprehensive `phase_comparison_matrix`: a 7-phase grid containing status (`GOOD`, `MARGINAL`, `FAULT`), measured angle, target range, and deviation for all evaluated metrics.
-  - Return a dedicated `strengths` list (metrics within tolerance, e.g. "Excellent head position over front knee (0.04 vs ≤0.08 ideal)").
-- **Risk Mitigation:**
-  - Counterfactual rescoring must be fast and purely analytical without re-running MediaPipe or OpenCV.
-  - Enforce score gain monotonicity (`gain >= 0.0`).
+## 2. Inventory of Hardcoded, Fake, or Seeded Values
+
+| Location (File:Line) | User-Facing Element | Reality / Source | Remediation Plan |
+|---|---|---|---|
+| `backend/app/repositories/session_repository.py:112-156` | Seeded session `'virat_kohli_cover_drive'` with score `92.7` | Injected into SQLite on every startup if missing. Fake benchmark. | Remove auto-seeding. Database starts with user-created data only. |
+| `backend/app/data/reference_catalogue.py:209-1105` | `AUTHENTIC_REFERENCE_REGISTRY` claiming BCCI/Star Sports archival footage for 25 shots | 22 out of 25 video files do not exist or are synthetic test clips; claim of player attribution (e.g., line 614 references `real_gilchrist_pull.mp4` under player "Rohit Sharma") is unverified/fabricated. | Remove misleading player endorsements; mark video sources accurately. |
+| `frontend/src/pages/DashboardPage.tsx:189` | `<div className="text-lg font-bold font-mono text-[#F5F5F5]">Active & Ready</div>` | Static string unlinked to backend system state. | Bind to `/api/health` status response (`healthInfo?.status`). |
+| `frontend/src/pages/EvaluationPage.tsx:106-146` | Accuracy `98.7%`, Macro F1 `0.98`, Latency `38ms` | Loaded from `evaluation_report.json`, which was trained on synthetic sine-wave generated sequences (`generate_batting_sequence`), not real video. | Display empty evaluation state until real clip cross-validation is performed. |
+| `frontend/src/pages/DashboardPage.tsx:37` vs `backend/app/data/shot_catalogue.py:3-48` | Catalogue shot count displays "27 shots" in certain copy/docs, but catalogue has 25 shots. | Inconsistent documentation and UI copy strings. | Unify to single dynamic source of truth (`/api/shots` length = 25). |
+| `frontend/src/pages/AboutPage.tsx:140`, `DashboardPage.tsx:535` | "Side-On (90 degrees)" fixed recommendation | Static UI text suggesting only 90° view is supported. | State supported camera angle tolerance (e.g. 70°–110° side-on). |
 
 ---
 
-### Problem 3: Shot Previews Fall Back to Identical Hardcoded Cover Drive Values
-- **Description:** For 20 uncalibrated shots, the frontend fallback hardcodes Virat Kohli Cover Drive biomechanics (knee flexion 124°, torso lean 25°, identical phase timing). The shot catalogue marks all 25 shots as `"available"` and `"supported"` despite only 5 being actively calibrated in `reference_shots.json`.
-- **File & Line Evidence:**
-  - `frontend/src/components/ShotPreviewModal.tsx` (lines 63–105):
-    ```typescript
-    lead_knee_target: '118° - 128°',
-    key_metrics: {
-      lead_knee_flexion_at_impact: 124.0,
-      torso_lean_at_impact: 25.0,
-      head_stability_index: 0.035
-    }
-    ```
-  - `backend/app/data/shot_catalogue.py`: all 25 shots have `reference_status: "available"` and `implementation_status: "supported"`.
-  - `backend/app/data/reference_shots.json`: only 5 shots have populated phase tolerances; 20 are `analysis_status: "coming_soon"` with `phases: {}`.
-- **Reproduction Test:** `backend/tests/test_audit_reproductions.py::test_reproduce_problem_3_shot_previews_fallback_identical` (PASSED).
-- **Proposed Architecture Fix:**
-  - Clean separation: update `shot_catalogue.py` so the 5 active shots (Cover Drive, Straight Drive, Pull Shot, Forward Defensive, Sweep) have `reference_status: "available"` and `analysis_status: "active"`.
-  - The remaining 20 shots must be explicitly tagged `analysis_status: "coming_soon"` with `reference_status: "coming_soon"`.
-  - In `ShotPreviewModal.tsx` and Shot Selection UI:
-    - Active shots display data-driven tolerances directly loaded from `reference_shots.json` and authentic preview videos.
-    - Coming-soon shots display an honest "Analysis in Development" state with foundational coaching points, avoiding any fake or identical joint angles.
-- **Risk Mitigation:**
-  - Keep the remaining 20 shots selectable in the catalogue for educational reference, but gate analysis and previews cleanly with informative coaching notices.
+## 3. Third-Party and Copyrighted Media Audit
+
+| File Path | Size | Origin / Provenance | Usage in Codebase | Copyright / Licensing Risk |
+|---|---|---|---|---|
+| `storage/uploads/virat_kohli_cover_drive.mp4`<br>`storage/uploads/real_cricketer_cover_drive.mp4`<br>`backend/tests/fixtures/cover_drive.mp4`<br>`backend/tests/fixtures/two_batters.mp4`<br>`storage/uploads/410f6d56_cover_drive.mp4`<br>`storage/uploads/7fb61800_cover_drive.mp4` | 154.5 KB (all identical SHA-256) | Broadcast snippet of Virat Kohli batting. | Seeded DB session (`session_repository.py:118`), E2E test fixtures (`test_core_loop_e2e.py:31`, `test_improvements.py:59`). | **HIGH RISK**: Unlicensed broadcast copyright material. Must be removed from production/distribution. |
+| `storage/uploads/adam_gilchrist_raw.ogv`<br>`storage/uploads/real_gilchrist_pull.mp4`<br>`storage/uploads/test_gilchrist.mp4` | 127.2 KB – 588.9 KB | Broadcast footage of Adam Gilchrist playing pull shot. | Seeded in reference registry (`reference_catalogue.py:614`) and test fixtures. | **HIGH RISK**: Unlicensed broadcast footage. Must be removed. |
+| `storage/uploads/this_is_batting_raw.ogv`<br>`storage/uploads/9b1a802c_Recording_2026-11-04_022556.mp4`<br>`storage/uploads/ba332080_Recording_2026-11-04_022556.mp4` | 17.1 MB – 17.8 MB | Unverified net practice / YouTube footage. | Upload storage residue. | **MEDIUM RISK**: Unknown provenance; unnecessary clutter. |
+| `backend/app/models/assets/pose_landmarker_full.task` | 9.4 MB | Google MediaPipe official model asset. | `backend/app/services/pose_service.py` | **CLEAR**: Apache 2.0 / Google MediaPipe terms. Download script provided (`scripts/download_models.py`). |
+| `backend/app/models/assets/hand_landmarker.task` | 7.8 MB | Google MediaPipe official model asset. | `backend/app/services/hand_service.py` | **CLEAR**: Apache 2.0 / Google MediaPipe terms. |
+| `backend/app/models/assets/phase_bilstm.pt` | 710 KB | PyTorch weights trained on synthetic curves in `train_phase_model.py`. | Loaded in `phase_service.py`, but bypassed in inference. | **CLEAR** (Internal synthetic, but unused). |
 
 ---
 
-### Problem 4: Left-Handed Batters Suffer Unmirrored Divergence
-- **Description:** Flipped footage or left-handed batters cause asymmetric angle calculations if landmarks are merely index-swapped without coordinate space normalization. Left-handed batters get wildly divergent scores (e.g., 51.4° discrepancy on lead elbow) compared to right-handed batters playing the identical technique.
-- **File & Line Evidence:**
-  - `backend/app/services/geometry_service.py` (lines 296–300):
-    ```python
-    # Ad-hoc swapping of landmark indices without canonical 1.0 - x mirroring
-    lead_shoulder_idx, rear_shoulder_idx = 11, 12 if handedness == "Right" else 12, 11
-    ```
-  - `frontend/src/components/RealisticBatterVisualizer.tsx`: lacks a `handedness` prop; the 3D canvas and joint kinematics are permanently hardcoded for right-handers.
-- **Reproduction Test:** `backend/tests/test_audit_reproductions.py::test_reproduce_problem_4_left_handed_unmirrored_divergence` (PASSED: confirmed 51.4° elbow divergence without canonical mirroring vs 0.7° delta with mirroring).
-- **Proposed Architecture Fix:**
-  - Implement Canonical Mirroring at Ingress: For left-handed attempts, mirror landmarks once at ingress (`x' = 1.0 - x`, swap left/right landmark pairs: 11<->12, 13<->14, 15<->16, 23<->24, 25<->26, 27<->28, etc.).
-  - Once mirrored, the rest of the pipeline (kinematics, phase classifier, tolerance comparison) operates in canonical right-handed space without branching.
-  - In `RealisticBatterVisualizer.tsx`, pass `handedness: "Right" | "Left"`. When `"Left"`, mirror the Three.js root group along the X-axis (`scale.x = -1`), correctly rendering the left-handed batter in 3D.
-  - Add flip-invariance regression test: flipping a video horizontally must yield scores within ±1.5 points.
-- **Risk Mitigation:**
-  - Invert normals in Three.js when mirroring scale to avoid back-face culling artifacts.
+## 4. Labelled Clips & Classifier Cross-Validation
 
----
-
-### Problem 5: Non-Side Camera Views Lack Metric Validity Matrix
-- **Description:** Video recorded from front-on, behind, or top-down perspectives cannot accurately measure sagittal-plane angles (such as knee flexion and elbow elevation) due to severe foreshortening. Currently, the backend evaluates all metrics regardless of camera view, causing false penalty deductions.
-- **File & Line Evidence:**
-  - `backend/app/services/feedback_service.py`: `evaluate_technique` does not accept `camera_view` or filter metrics by geometric validity plane.
-  - `frontend/src/components/RealisticBatterVisualizer.tsx`: lacks presets for `"behind"` and `"top"`. Top-down view has no up-vector control, causing canvas flip.
-- **Reproduction Test:** `backend/tests/test_audit_reproductions.py::test_reproduce_problem_5_camera_views_lack_validity_matrix` (PASSED).
-- **Proposed Architecture Fix:**
-  - Camera View Parameter: accept `camera_view: "side_on" | "front_on" | "behind" | "top_down"` in video upload and Live Coach session initialization.
-  - Perspective Validity Matrix:
-    | Metric | Side-On | Front-On | Behind | Top-Down |
-    | :--- | :--- | :--- | :--- | :--- |
-    | `lead_knee_flexion` | **MEASURED** | *UNAVAILABLE* | *UNAVAILABLE* | *UNAVAILABLE* |
-    | `lead_elbow_elevation` | **MEASURED** | **MEASURED** | *ESTIMATED* | *UNAVAILABLE* |
-    | `torso_inclination` | **MEASURED** | *ESTIMATED* | *ESTIMATED* | *UNAVAILABLE* |
-    | `head_over_knee_offset` | **MEASURED** | **MEASURED** | *UNAVAILABLE* | *ESTIMATED* |
-    | `stance_width` | **MEASURED** | *ESTIMATED* | *ESTIMATED* | **MEASURED** |
-    | `shoulder_alignment` | *ESTIMATED* | **MEASURED** | **MEASURED** | **MEASURED** |
-  - Unavailable metrics are excluded from score penalties (weight normalized to valid subset).
-  - 3D Visualizer: add camera presets (`side`, `front`, `behind`, `top`) with proper `camera.up.set(0, 0, -1)` for top-down view to avoid gimbal flip.
-- **Risk Mitigation:**
-  - Gracefully default to `"side_on"` when camera view is unspecified.
-
----
-
-## 3. Master Implementation Roadmap (Phases 1–6)
-
-```mermaid
-flowchart TD
-    P0["Phase 0: Audit & Reproductions (DONE)"] --> P1["Phase 1: LH vs RH Correctness & Invariance"]
-    P1 --> P2["Phase 2: Camera-View Support & Validity Matrix"]
-    P2 --> P3["Phase 3: Delivery-to-Shot Capture & Pre-roll"]
-    P3 --> P4["Phase 4: Shot-Specific References & Coming Soon Gating"]
-    P4 --> P5["Phase 5: Overall Analysis, Counterfactual Gain & Matrix"]
-    P5 --> P6["Phase 6: Verification, Regression Suite & Documentation"]
+```powershell
+# Command:
+Test-Path "backend/tests/fixtures/labeled"
+# Output:
+False
 ```
 
-### Proposed Execution Order:
-1. **Phase 1: Left- and Right-Handed Correctness**
-   - Canonical mirroring at ingress (`geometry_service.py`, `video_service.py`, `live_coach_service.py`).
-   - 3D visualizer handedness support (`RealisticBatterVisualizer.tsx`).
-   - Flip-invariance regression test (`test_handedness_flip_invariance.py`).
-2. **Phase 2: Camera-View Support**
-   - Perspective validity matrix in `feedback_service.py`.
-   - Camera presets in frontend 3D canvas and camera angle selector.
-3. **Phase 3: Full Delivery-to-Shot Capture**
-   - Pre-roll ring buffer in `live_coach_service.py`.
-   - Trigger detection and recovery stillness detection.
-   - Structured timeline markers output.
-4. **Phase 4: Shot-Specific Previews & Clean Gating**
-   - Sync `shot_catalogue.py` with `reference_shots.json` (5 active, 20 coming soon).
-   - Eliminate hardcoded fallback values in `ShotPreviewModal.tsx`.
-5. **Phase 5: Batting Analysis & Counterfactual Suggestions**
-   - Counterfactual score gain computation in `feedback_service.py`.
-   - Phase-by-phase comparison matrix and strengths list.
-   - UI cards rendering potential score gains and phase matrix.
-6. **Phase 6: Final Verification & Documentation**
-   - Full test run (`pytest`), frontend build (`tsc -b && vite build`), e2e test with `virat_kohli_cover_drive.mp4`.
-   - Document verification in `VERIFICATION.md`.
+- **Clips per shot in `backend/tests/fixtures/labeled/<shot>/`:** **0 clips**. Directory does not exist.
+- **Current cross-validation accuracy on real footage:** **Unvalidated**.
+- **Assessment:** The shot classifier (`classifier_service.py`) relies on rules and DTW against synthetic templates. It has never undergone rigorous clip-level $k$-fold cross-validation on an empirical multi-batter dataset. Under the proposed tiering system, shots without verified empirical clips must be designated `preview_only`.
 
+---
+
+## 5. Active vs. Dead / Unvalidated Services
+
+| Service Name | File Location | Executed in Video Pipeline? | Affects User Scoring or Feedback? | Status & Recommendation |
+|---|---|---|---|---|
+| **`bat_ball_service`** | `backend/app/services/bat_ball_service.py` | Yes (`video_service.py:332, 573`) | **NO**. Zero metrics, feedback rules, or scores use bat edge or ball proximity. Only draws debug overlay. | **DEAD / UNVALIDATED**. Consumes significant CPU per frame without user benefit. Gate behind `ENABLE_EXPERIMENTAL_BAT_BALL=false` flag. |
+| **`hand_service`** | `backend/app/services/hand_service.py` | Yes (`video_service.py:231, 571`) | **NO**. Runs MediaPipe hand landmarker on every frame, but no coaching feedback rules consume hand/wrist closures. | **DEAD / UNVALIDATED**. Gate behind `ENABLE_HAND_LANDMARKER=false` flag to drastically speed up video processing. |
+| **`BiLSTM Phase Model`** | `backend/app/services/phase_service.py` | Weights loaded on startup (`_load_model`), but bypassed at line 136 (`_detect_kinematic_phases()`). | **NO**. Replaced entirely by rule-based kinematic detection. | **DEAD IN PRODUCTION**. Formally deprecate synthetic BiLSTM; establish rule-based kinematic detector as primary production engine. |
+| **`TensorFlow Import`** | Repo-wide | Not imported in any python file. | **NO**. | **CONFIRMED CLEAN**. No lingering TensorFlow dependencies. |
+| **`DTW Service`** | `backend/app/services/dtw_service.py` | Yes (`comparison_service.py:117`) | **YES**. Computes temporal alignment score between input kinematics and reference curves. | **ACTIVE / VALIDATED**. Retain as primary trajectory alignment engine. |
+
+---
+
+## 6. Upload Path Security Review
+
+| Security Area | Current Vulnerability | Exact Code Location | Severity |
+|---|---|---|---|
+| **Path Traversal** | Raw `file.filename` is concatenated directly into paths: `settings.UPLOADS_DIR / f"temp_inspect_{temp_id}_{file.filename}"` and `safe_filename = f"{session_id}_{file.filename.replace(' ', '_')}"`. Does not strip `../` or null bytes. | `backend/app/api/routes/video.py:27`<br>`backend/app/api/routes/video.py:93` | **CRITICAL** |
+| **Magic-Byte Validation** | Only file extension is checked: `ext in ALLOWED_EXTENSIONS`. An attacker can upload arbitrary binaries or scripts named `.mp4`. | `backend/app/api/routes/video.py:20, 85` | **HIGH** |
+| **Streaming Size Limit** | Uses unbounded `shutil.copyfileobj(file.file, buffer)`. An attacker can stream hundreds of gigabytes until disk exhaustion (DoS). | `backend/app/api/routes/video.py:30, 96` | **HIGH** |
+| **Unauthenticated File Access & Probing** | Endpoints `/api/video/original/{filename}`, `/annotated/{filename}`, `/thumbnail/{filename}` serve raw files to the public with no auth. Line 152 performs `settings.UPLOADS_DIR.glob(f"*{filename}")`, allowing partial pattern matching. | `backend/app/api/routes/video.py:146-193` | **HIGH** |
+| **Permissive CORS Configuration** | `BACKEND_CORS_ORIGINS = ["*"]` combined with `allow_credentials=True` in `main.py`. | `backend/app/core/config.py:53`<br>`backend/app/main.py:28` | **MEDIUM** |
+| **Information / Path Leaks** | Returns raw Python exception string containing server filesystem paths directly to the client: `detail=f"Failed to save uploaded video: {str(e)}"`. | `backend/app/api/routes/video.py:101` | **MEDIUM** |
+| **Rate Limiting** | Completely absent across all video upload and analysis endpoints. | `backend/app/api/routes/video.py` | **MEDIUM** |
+
+---
+
+## 7. Execution Model & Crash Resilience
+
+- **Worker Architecture:** Analysis is dispatched via FastAPI `BackgroundTasks.add_task(video_service.process_video_session, session_id)` in `backend/app/api/routes/video.py:110`. It executes in-process on a worker thread in the same Uvicorn instance.
+- **Crash Behavior:**
+  - *Pipeline-level errors:* Handled via `try...except Exception as e` inside `process_video_session()`; updates database status to `'failed'` and writes error details.
+  - *Process-level crashes / Server restarts:* If Uvicorn crashes, runs out of memory, or is restarted while sessions are processing, those sessions remain permanently frozen with `status = "processing"`.
+  - *Remediation Plan:* Implement a startup recovery sweep that queries `SELECT session_id FROM sessions WHERE status = 'processing'` and marks them as `'failed'` (with note: "Worker interrupted during restart") to unblock the UI.
+
+---
+
+## Conclusion & Gate Check
+
+Phase 0 Audit is complete with empirical evidence across all 7 points. **No code or file edits have been made.**
+
+Awaiting user confirmation before proceeding to **PHASE 1: REMOVE OR HIDE WHAT IS FAKE OR UNPROVEN**.

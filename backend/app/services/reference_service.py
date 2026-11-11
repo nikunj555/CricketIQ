@@ -55,11 +55,46 @@ class ReferenceService:
         canonical = self.canonicalize_shot_name(shot_name_or_slug)
         return self._data.get(canonical)
 
+    def get_shot_support_tier(self, shot_name_or_slug: str) -> str:
+        """
+        Derives shot support tier from real labelled empirical clips:
+        - 'supported': has at least MIN_CLIPS_FOR_SUPPORTED_SHOT (default 8) clips
+          across at least MIN_BATTERS_FOR_SUPPORTED_SHOT (default 2) distinct batters.
+        - 'preview_only': avatar, cues, and library viewing only; no scoring or classification.
+        """
+        from backend.app.core.config import settings
+        canonical = self.canonicalize_shot_name(shot_name_or_slug)
+        slug = canonical.lower().strip().replace(" ", "-").replace("_", "-")
+        shot_dir = settings.LABELED_FIXTURES_DIR / slug
+
+        if not shot_dir.exists() or not shot_dir.is_dir():
+            return "preview_only"
+
+        clips = list(shot_dir.glob("*.mp4"))
+        if not clips:
+            clips = list(shot_dir.glob("*.json"))
+        clip_stems = {c.stem for c in clips}
+        if len(clip_stems) < settings.MIN_CLIPS_FOR_SUPPORTED_SHOT:
+            return "preview_only"
+
+        batters = set()
+        for stem in clip_stems:
+            parts = stem.split("_")
+            if len(parts) > 1:
+                batters.add(parts[0])
+            else:
+                batters.add("default")
+
+        if len(batters) >= settings.MIN_BATTERS_FOR_SUPPORTED_SHOT:
+            return "supported"
+        return "preview_only"
+
     def is_shot_analysis_available(self, shot_name_or_slug: str) -> bool:
         shot = self.get_shot_reference(shot_name_or_slug)
         if not shot:
             return False
-        return shot.get("analysis_status") == "available"
+        tier = self.get_shot_support_tier(shot_name_or_slug)
+        return tier == "supported"
 
     def get_phase_ideal_range(
         self,

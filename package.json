@@ -1,0 +1,22 @@
+{
+  "name": "cricketiq",
+  "version": "1.0.0",
+  "description": "CricketIQ - Explainable AI System for Cricket Batting Technique Assessment and Kinematic Video Analysis",
+  "private": true,
+  "engines": {
+    "node": ">=20.0.0",
+    "npm": ">=9.0.0"
+  },
+  "scripts": {
+    "dev": "powershell -ExecutionPolicy Bypass -File scripts/dev.ps1",
+    "dev:sh": "bash scripts/dev.sh",
+    "setup": "powershell -ExecutionPolicy Bypass -File scripts/setup.ps1",
+    "setup:sh": "bash scripts/setup.sh",
+    "start": "python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000",
+    "build": "npm run build --prefix frontend",
+    "lint": "npm run lint --prefix frontend",
+    "test": "pytest backend/tests -v",
+    "test:e2e": "npm run test:e2e --prefix frontend",
+    "smoke": "python scripts/smoke_test.py"
+  }
+}

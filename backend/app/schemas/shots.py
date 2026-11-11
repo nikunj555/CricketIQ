@@ -19,7 +19,8 @@ class CricketShot(BaseModel):
     reference_video_url: Optional[str] = None
     reference_thumbnail_url: Optional[str] = None
     implementation_status: str  # "supported" | "experimental" | "in_development"
-    analysis_status: Optional[str] = "available"  # "available" | "coming_soon"
+    support_tier: Optional[str] = "preview_only"  # "supported" | "preview_only"
+    analysis_status: Optional[str] = "available"  # "available" | "preview_only" | "coming_soon"
     status_message: Optional[str] = None
     technique_notes: Optional[str] = None
 

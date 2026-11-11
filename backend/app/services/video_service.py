@@ -43,7 +43,9 @@ class VideoService:
                 "error": f"File size ({size_mb:.1f} MB) exceeds maximum allowed limit of {settings.MAX_UPLOAD_SIZE_MB} MB."
             }
 
-        cap = cv2.VideoCapture(str(file_path))
+        cap = cv2.VideoCapture(str(file_path), cv2.CAP_FFMPEG)
+        if not cap.isOpened():
+            cap = cv2.VideoCapture(str(file_path))
         if not cap.isOpened():
             cap.release()
             return {"valid": False, "error": "Unable to decode video. File may be corrupted or codec unsupported."}
@@ -73,14 +75,16 @@ class VideoService:
                 "Try recording at 720p or higher for best tracking results."
             )
 
+        if duration_sec > settings.MAX_VIDEO_DURATION_SEC:
+            return {
+                "valid": False,
+                "error": f"Video duration ({duration_sec:.1f}s) exceeds maximum allowed duration of {settings.MAX_VIDEO_DURATION_SEC}s."
+            }
+
         if duration_sec < 0.8:
             warnings.append(
                 f"Very short clip ({duration_sec:.2f}s). At least 0.8 s of footage (≈ 24 frames @ 30fps) "
                 "is recommended to capture the full batting stroke cycle."
-            )
-        elif duration_sec > 120.0:
-            warnings.append(
-                f"Long clip ({duration_sec:.1f}s). Processing up to {settings.MAX_FRAMES_TO_PROCESS} frames."
             )
 
         result = {
@@ -148,8 +152,13 @@ class VideoService:
                 try:
                     import json
                     with open(gt_file, "r") as f:
-                        groundtruth_data = json.load(f)
-                    logger.info(f"Loaded {len(groundtruth_data)} ground-truth frames for {input_path.name}")
+                        loaded_gt = json.load(f)
+                    if isinstance(loaded_gt, list):
+                        groundtruth_data = loaded_gt
+                    elif isinstance(loaded_gt, dict) and "frames" in loaded_gt:
+                        groundtruth_data = loaded_gt["frames"]
+                    if groundtruth_data:
+                        logger.info(f"Loaded {len(groundtruth_data)} ground-truth frames for {input_path.name}")
                 except Exception as e:
                     logger.warning(f"Failed to load groundtruth file {gt_file.name}: {e}")
 
@@ -158,7 +167,9 @@ class VideoService:
             # -------------------------------------------------------------
             session_repo.update_progress(session_id, "processing", 15.0, "Extracting pose landmarks on video sequence...")
 
-            cap = cv2.VideoCapture(str(input_path))
+            cap = cv2.VideoCapture(str(input_path), cv2.CAP_FFMPEG)
+            if not cap.isOpened():
+                cap = cv2.VideoCapture(str(input_path))
             tracker = MultiPersonTracker(max_disappeared=15)
             active_striker_id = striker_track_id
 
@@ -177,97 +188,55 @@ class VideoService:
             raw_detected_world: Dict[int, Optional[List[Any]]] = {}
             raw_detected_hands: Dict[int, Dict[str, Any]] = {}
             raw_detected_bat_ball: Dict[int, Dict[str, Any]] = {}
+            per_frame_person_tracks: Dict[int, Dict[int, Dict[str, Any]]] = {}
 
             frame_idx = 0
             analyzed_count = 0
 
             while cap.isOpened():
+                if frame_idx not in sampled_indices:
+                    grab_ok = cap.grab()
+                    if not grab_ok:
+                        break
+                    frame_idx += 1
+                    continue
+
                 ret, frame = cap.read()
                 if not ret:
                     break
 
-                if frame_idx in sampled_indices:
-                    analyzed_count += 1
-                    if scale < 1.0:
-                        proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
-                    else:
-                        proc_frame = frame
+                analyzed_count += 1
+                if scale < 1.0:
+                    proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                    del frame
+                else:
+                    proc_frame = frame
 
-                    # Multi-person MediaPipe pose extraction
-                    multi_poses = pose_service.detect_frame_multi(proc_frame)
-                    current_tracks = tracker.update(multi_poses)
+                # Multi-person MediaPipe pose extraction across all people in frame
+                multi_poses = pose_service.detect_frame_multi(proc_frame)
+                current_tracks = tracker.update(multi_poses, frame_idx=frame_idx)
 
-                    # Determine and lock the striker on frame 0 or initial frames
-                    if active_striker_id is None and current_tracks:
-                        if striker_tap_coords and len(striker_tap_coords) >= 2:
-                            tx, ty = float(striker_tap_coords[0]), float(striker_tap_coords[1])
-                            best_dist = 999.0
-                            best_tid = None
-                            for tid, tr in current_tracks.items():
-                                bx1, by1, bx2, by2 = tr["bbox"]
-                                if bx1 <= tx <= bx2 and by1 <= ty <= by2:
-                                    best_tid = tid
-                                    break
-                                cx = (bx1 + bx2) / 2.0
-                                cy = (by1 + by2) / 2.0
-                                dist = math.hypot(cx - tx, cy - ty)
-                                if dist < best_dist:
-                                    best_dist = dist
-                                    best_tid = tid
-                            active_striker_id = best_tid
-                        else:
-                            active_striker_id = max(current_tracks.keys(), key=lambda t: current_tracks[t].get("wrist_motion_total", 0.0))
+                # Store per-frame snapshot of all person tracks for striker isolation
+                per_frame_person_tracks[frame_idx] = {
+                    tid: {
+                        "landmarks": tr["landmarks"],
+                        "world_landmarks": tr.get("world_landmarks"),
+                        "bbox": tr["bbox"],
+                        "is_lost": tr.get("is_lost", False)
+                    }
+                    for tid, tr in current_tracks.items()
+                }
 
-                    # Lock landmark extraction exclusively to active_striker_id
-                    lms = None
-                    world_lms = None
-                    if active_striker_id is not None and active_striker_id in current_tracks and not current_tracks[active_striker_id].get("is_lost"):
-                        lms = current_tracks[active_striker_id]["landmarks"]
-                        world_lms = current_tracks[active_striker_id].get("world_landmarks")
-                    elif current_tracks and len(current_tracks) == 1:
-                        single_tr = next(iter(current_tracks.values()))
-                        lms = single_tr["landmarks"]
-                        world_lms = single_tr.get("world_landmarks")
+                # Hand tracking (gated behind feature flag)
+                hands_info = hand_service.detect_hands(proc_frame, handedness=handedness) if settings.ENABLE_HAND_LANDMARKER else None
+                raw_detected_hands[frame_idx] = hands_info
 
-                    # If calibrated ground truth is available for this reference clip, prioritize calibrated landmarks
-                    if groundtruth_data and frame_idx < len(groundtruth_data):
-                        gt_lms = groundtruth_data[frame_idx].get("landmarks")
-                        if gt_lms and len(gt_lms) >= 33:
-                            lms = gt_lms
-                        elif not lms or len(lms) < 33:
-                            lms = gt_lms
-
-                    raw_detected_landmarks[frame_idx] = lms
-                    raw_detected_world[frame_idx] = world_lms
-
-                    # Hand tracking
-                    hands_info = hand_service.detect_hands(proc_frame, handedness=handedness)
-                    raw_detected_hands[frame_idx] = hands_info
-
-                    # Bat tracking
-                    wrist_pts = []
-                    if lms and len(lms) >= 17:
-                        lw = lms[15]
-                        rw = lms[16]
-                        if getattr(lw, 'visibility', 0.5) > 0.2:
-                            wrist_pts.append((float(getattr(lw, 'x', 0.0)), float(getattr(lw, 'y', 0.0))))
-                        if getattr(rw, 'visibility', 0.5) > 0.2:
-                            wrist_pts.append((float(getattr(rw, 'x', 0.0)), float(getattr(rw, 'y', 0.0))))
-
-                    bat_info = bat_ball_service.detect_bat_and_ball(
-                        proc_frame,
-                        wrist_pts=wrist_pts,
-                        torso_scale=0.3,
-                        timestamp_sec=round(frame_idx / fps, 3)
+                if analyzed_count % 15 == 0:
+                    pct = 15.0 + min(45.0, (frame_idx / max(1, total_frames)) * 45.0)
+                    session_repo.update_progress(
+                        session_id, "processing", round(pct, 1),
+                        f"Analyzing frame {frame_idx + 1}/{total_frames} (tracking persons & batsman isolation)..."
                     )
-                    raw_detected_bat_ball[frame_idx] = bat_info
-
-                    if analyzed_count % 15 == 0:
-                        pct = 15.0 + min(45.0, (frame_idx / max(1, total_frames)) * 45.0)
-                        session_repo.update_progress(
-                            session_id, "processing", round(pct, 1),
-                            f"Analyzing frame {frame_idx + 1}/{total_frames} (striker tracking active)..."
-                        )
 
                 frame_idx += 1
                 if frame_idx >= settings.MAX_FRAMES_TO_PROCESS:
@@ -279,6 +248,116 @@ class VideoService:
             if actual_total_frames == 0:
                 session_repo.update_progress(session_id, "failed", 0.0, "No frames could be extracted from video.")
                 return
+
+            # Multi-cue striker classification across all detected tracks
+            best_tid, track_classifications, needs_confirmation = tracker.classify_tracks(total_frames=actual_total_frames)
+
+            # Resolve locked active striker (user override > tap coords > multi-cue classification)
+            striker_select_method = "automatic_multi_cue"
+            if striker_track_id is not None:
+                active_striker_id = striker_track_id
+                striker_select_method = "user_specified_track"
+            elif striker_tap_coords and len(striker_tap_coords) >= 2:
+                try:
+                    tx, ty = float(striker_tap_coords[0]), float(striker_tap_coords[1])
+                    f0_tracks = per_frame_person_tracks.get(0, per_frame_person_tracks.get(min(per_frame_person_tracks.keys(), default=0), {}))
+                    best_dist = 999.0
+                    matched_tid = None
+                    for tid, tr_info in f0_tracks.items():
+                        bx1, by1, bx2, by2 = tr_info["bbox"]
+                        if bx1 <= tx <= bx2 and by1 <= ty <= by2:
+                            matched_tid = tid
+                            break
+                        cx = (bx1 + bx2) / 2.0
+                        cy = (by1 + by2) / 2.0
+                        d = math.hypot(cx - tx, cy - ty)
+                        if d < best_dist:
+                            best_dist = d
+                            matched_tid = tid
+                    if matched_tid is not None:
+                        active_striker_id = matched_tid
+                        striker_select_method = "user_tap_coords"
+                    else:
+                        active_striker_id = best_tid
+                except Exception:
+                    active_striker_id = best_tid
+            else:
+                active_striker_id = best_tid
+
+            striker_meta = track_classifications.get(active_striker_id, {})
+            striker_evidence = striker_meta.get("evidence", {})
+            striker_confidence = striker_meta.get("confidence", 0.85)
+
+            logger.info(
+                f"Striker Isolated: Track #{active_striker_id} (method: {striker_select_method}, "
+                f"conf: {striker_confidence:.2f}, role: {striker_meta.get('role', 'striker')})"
+            )
+
+            # Isolate striker landmarks exclusively across sampled frames
+            for s_idx in sorted(per_frame_person_tracks.keys()):
+                f_tracks = per_frame_person_tracks[s_idx]
+                lms = None
+                world_lms = None
+                if active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
+                    lms = f_tracks[active_striker_id]["landmarks"]
+                    world_lms = f_tracks[active_striker_id]["world_landmarks"]
+                elif len(f_tracks) == 1:
+                    single_tr = next(iter(f_tracks.values()))
+                    lms = single_tr["landmarks"]
+                    world_lms = single_tr.get("world_landmarks")
+
+                # If calibrated ground truth is available for this reference clip, prioritize calibrated landmarks
+                if groundtruth_data and s_idx < len(groundtruth_data):
+                    gt_lms = groundtruth_data[s_idx].get("landmarks")
+                    if gt_lms and len(gt_lms) >= 33:
+                        lms = gt_lms
+                        world_lms = None
+                    elif not lms or len(lms) < 33:
+                        lms = gt_lms
+                        world_lms = None
+
+                raw_detected_landmarks[s_idx] = lms
+                raw_detected_world[s_idx] = world_lms
+
+                # Bat tracking keyed off isolated striker wrists
+                wrist_pts = []
+                if lms and len(lms) >= 17:
+                    lw = lms[15]
+                    rw = lms[16]
+                    if getattr(lw, 'visibility', 0.5) > 0.2:
+                        wrist_pts.append((float(getattr(lw, 'x', 0.0)), float(getattr(lw, 'y', 0.0))))
+                    if getattr(rw, 'visibility', 0.5) > 0.2:
+                        wrist_pts.append((float(getattr(rw, 'x', 0.0)), float(getattr(rw, 'y', 0.0))))
+
+                raw_detected_bat_ball[s_idx] = bat_ball_service.detect_bat_and_ball(
+                    None,
+                    wrist_pts=wrist_pts,
+                    torso_scale=0.3,
+                    timestamp_sec=round(s_idx / fps, 3)
+                ) if settings.ENABLE_EXPERIMENTAL_BAT_BALL else {}
+
+            # Check tracking dropouts for striker
+            missing_spans = []
+            cur_span = 0
+            cur_span_start = None
+            for f_k in sorted(raw_detected_landmarks.keys()):
+                if raw_detected_landmarks[f_k] is None:
+                    if cur_span == 0:
+                        cur_span_start = f_k
+                    cur_span += 1
+                else:
+                    if cur_span > 0:
+                        missing_spans.append((cur_span_start, f_k - 1, cur_span))
+                        cur_span = 0
+                        cur_span_start = None
+            if cur_span > 0:
+                missing_spans.append((cur_span_start, max(raw_detected_landmarks.keys(), default=0), cur_span))
+
+            long_dropouts = [s for s in missing_spans if s[2] > 10]
+            tracking_dropout_warning = None
+            if long_dropouts:
+                dropout_descs = [f"frames {s[0]}-{s[1]} ({s[2]} frames)" for s in long_dropouts]
+                tracking_dropout_warning = f"Striker tracking lost for >10 frames ({', '.join(dropout_descs)}). Kinematics bridged across dropouts."
 
             # Interpolate landmarks across 100% of frames so every frame has pose representation
             all_frame_landmarks: List[Optional[List[Any]]] = [None] * actual_total_frames
@@ -343,9 +422,9 @@ class VideoService:
                 if lms:
                     m["landmarks"] = [
                         {
-                            "x": round(float(getattr(lm, "x", None) if not isinstance(lm, dict) else lm.get("x", 0.0)), 4),
-                            "y": round(float(getattr(lm, "y", None) if not isinstance(lm, dict) else lm.get("y", 0.0)), 4),
-                            "v": round(float(getattr(lm, "visibility", 1.0) if not isinstance(lm, dict) else lm.get("visibility", 1.0)), 3)
+                            "x": round(float(getattr(lm, "x", None) if not isinstance(lm, dict) else lm.get("x", 0.0)), 3),
+                            "y": round(float(getattr(lm, "y", None) if not isinstance(lm, dict) else lm.get("y", 0.0)), 3),
+                            "v": round(float(getattr(lm, "visibility", 1.0) if not isinstance(lm, dict) else lm.get("visibility", 1.0)), 2)
                         }
                         for lm in lms
                     ]
@@ -356,7 +435,7 @@ class VideoService:
                     tracking_hits += 1
 
                 # Incorporate hand and bat tracking
-                h_info = all_hands[idx]
+                h_info = all_hands[idx] or {}
                 m["hand_tracking_detected"] = h_info.get("hand_tracking_detected", False)
                 m["lead_hand_detected"] = h_info.get("lead_hand_detected", False)
                 m["rear_hand_detected"] = h_info.get("rear_hand_detected", False)
@@ -364,7 +443,7 @@ class VideoService:
                 m["rear_hand_grip_closure"] = h_info.get("rear_hand_grip_closure")
                 m["hand_landmarks"] = h_info
 
-                bb_info = all_bat_ball[idx]
+                bb_info = all_bat_ball[idx] or {}
                 m["bat_detected"] = bb_info.get("bat_detected", False)
                 m["bat_angle_deg"] = bb_info.get("bat_angle_deg")
                 m["bat_tip_x"] = bb_info.get("bat_tip_x")
@@ -417,19 +496,30 @@ class VideoService:
 
             # Shot Classification based on actual extracted kinematics
             session_repo.update_progress(session_id, "processing", 76.0, "Classifying batting shot from extracted kinematics...")
+            auto_detect_requested = shot_type.strip().lower().replace(" ", "-") in {"auto-detect", "automatic"}
             classification_result = shot_classifier_service.classify_sequence(
-                frame_metrics, hint_shot=shot_type, camera_view=detected_view, handedness=handedness
+                frame_metrics, hint_shot=None if auto_detect_requested else shot_type,
+                camera_view=detected_view, handedness=handedness
             )
             predicted_shot = classification_result.get("predicted_shot", shot_type)
             prediction_conf = float(classification_result.get("confidence", 0.75))
+            is_uncertain = classification_result.get("is_uncertain", False)
 
-            # User-selected shot is always the source of truth; never silently override
-            active_shot = shot_type
+            # Auto-detect uses the recognized label for its reference lookup. Manual
+            # selection remains the reference choice when the user chose a shot.
+            if auto_detect_requested:
+                if predicted_shot in ("No clear shot detected", "Uncertain", "Unrecognised Shot"):
+                    cands = classification_result.get("top_candidates", [])
+                    active_shot = cands[0].get("shot_name", "Cover Drive") if cands else "Cover Drive"
+                else:
+                    active_shot = predicted_shot
+            else:
+                active_shot = shot_type
 
-            # Soft warning if classifier top prediction disagrees with selection with strong confidence
+            # Headline discrepancy notice if detected shot differs from selected shot
             shot_mismatch_warning = None
-            if predicted_shot.lower() != shot_type.lower() and prediction_conf >= 0.65:
-                shot_mismatch_warning = f"This looks more like a {predicted_shot} ({int(prediction_conf * 100)}%). Analyse as {shot_type}?"
+            if not auto_detect_requested and predicted_shot.lower() != shot_type.lower():
+                shot_mismatch_warning = f"You selected {shot_type}, but this looks like a {predicted_shot}."
 
             # Identify the impact frame index
             impact_frame_idx = None
@@ -449,7 +539,9 @@ class VideoService:
             annotated_path = settings.ANNOTATED_DIR / annotated_filename
             thumbnail_path = settings.THUMBNAILS_DIR / thumbnail_filename
 
-            cap_stream = cv2.VideoCapture(str(input_path))
+            cap_stream = cv2.VideoCapture(str(input_path), cv2.CAP_FFMPEG)
+            if not cap_stream.isOpened():
+                cap_stream = cv2.VideoCapture(str(input_path))
             fourcc = cv2.VideoWriter_fourcc(*'mp4v')
             writer = cv2.VideoWriter(str(annotated_path), fourcc, fps, (out_w, out_h))
 
@@ -461,6 +553,15 @@ class VideoService:
 
                 if frame.shape[1] != out_w or frame.shape[0] != out_h:
                     frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+
+                # Draw person bounding boxes on setup frames (0-20) to show striker isolation
+                if f_idx < 20 and f_idx in per_frame_person_tracks:
+                    frame = pose_service.draw_person_boxes(
+                        frame,
+                        per_frame_person_tracks[f_idx],
+                        active_striker_id,
+                        track_classifications
+                    )
 
                 lms = all_frame_landmarks[f_idx]
                 phase_name = per_frame_phases[f_idx] if f_idx < len(per_frame_phases) else "Analyzing"
@@ -476,10 +577,11 @@ class VideoService:
                     is_impact=is_impact
                 )
 
-                if m_curr.get("hand_landmarks"):
+                if settings.ENABLE_HAND_LANDMARKER and m_curr.get("hand_landmarks"):
                     annotated_frame = hand_service.draw_hands(annotated_frame, m_curr["hand_landmarks"])
 
-                annotated_frame = bat_ball_service.draw_bat_and_ball(annotated_frame, m_curr)
+                if settings.ENABLE_EXPERIMENTAL_BAT_BALL:
+                    annotated_frame = bat_ball_service.draw_bat_and_ball(annotated_frame, m_curr)
 
                 writer.write(annotated_frame)
 
@@ -487,11 +589,16 @@ class VideoService:
                     cv2.imwrite(str(thumbnail_path), annotated_frame)
                     thumb_saved = True
 
+                del frame
+                del annotated_frame
+
             cap_stream.release()
             writer.release()
 
             if not thumb_saved and annotated_path.exists():
-                cap_t = cv2.VideoCapture(str(annotated_path))
+                cap_t = cv2.VideoCapture(str(annotated_path), cv2.CAP_FFMPEG)
+                if not cap_t.isOpened():
+                    cap_t = cv2.VideoCapture(str(annotated_path))
                 r, f_first = cap_t.read()
                 if r:
                     cv2.imwrite(str(thumbnail_path), f_first)
@@ -571,16 +678,40 @@ class VideoService:
                 "ball_tracking_rate": round((ball_hits / max(1, actual_total_frames)) * 100.0, 1)
             }
 
-            # Evaluate technique against reference tolerances (with camera view validity)
-            overall_score, top_mistakes, all_obs = feedback_service.evaluate_technique(
-                frame_metrics, phase_segments, summary, shot_type=active_shot, camera_view=detected_view
-            )
-            summary["overall_technique_score"] = overall_score
+            # Check shot support tier: preview-only shots never receive a score or fake feedback
+            from backend.app.services.reference_service import reference_service
+            shot_tier = reference_service.get_shot_support_tier(active_shot)
+            shot_conf = classification_result.get("shot_confidence") or {}
+            conf_level_code = shot_conf.get("level_code", "fairly_sure")
 
-            # Generate structured metric comparison table (all phases and metrics vs ideal)
-            comparison_table = feedback_service.generate_comparison_table(
-                frame_metrics, shot_type=active_shot, camera_view=detected_view
-            )
+            if shot_tier != "supported":
+                eval_res = None
+                overall_score = None
+                top_mistakes = []
+                all_obs = []
+                comparison_table = []
+                summary["overall_technique_score"] = None
+                summary["support_tier"] = "preview_only"
+                coaching_paused = True
+                pause_reason = "Preview only: analysis coming soon"
+            else:
+                # Evaluate technique against reference tolerances (with camera view validity)
+                eval_res = feedback_service.evaluate_technique(
+                    frame_metrics, phase_segments, summary, shot_type=active_shot, camera_view=detected_view
+                )
+                overall_score, top_mistakes, all_obs = eval_res
+                summary["overall_technique_score"] = overall_score
+                summary["support_tier"] = "supported"
+
+                coaching_paused = conf_level_code in ["cant_tell", "not_sure"]
+                pause_reason = None
+                if coaching_paused:
+                    pause_reason = "Shot recognition is uncertain. Please confirm which shot you played so we can give you accurate technique coaching."
+
+                # Generate structured metric comparison table (all phases and metrics vs ideal)
+                comparison_table = feedback_service.generate_comparison_table(
+                    frame_metrics, shot_type=active_shot, camera_view=detected_view
+                )
 
             limitations = [
                 "Monocular 2D Projection: Joint angles are computed in the image projection plane and do not account for full 3D skeletal rotation or foreshortening.",
@@ -601,20 +732,62 @@ class VideoService:
                 "detected_camera_view": detected_view
             }
 
+            # Assemble candidate tracks for manual UI override
+            striker_candidates = []
+            for tid, meta in track_classifications.items():
+                t_bbox = [0.0, 0.0, 1.0, 1.0]
+                if tid in tracker.tracks:
+                    t_bbox = tracker.tracks[tid].get("bbox", [0.0, 0.0, 1.0, 1.0])
+                striker_candidates.append({
+                    "track_id": tid,
+                    "bbox": t_bbox,
+                    "is_selected": (tid == active_striker_id),
+                    "role": meta.get("role", "other"),
+                    "confidence": meta.get("confidence", 0.5),
+                    "striker_score": meta.get("striker_score", 0.0),
+                    "is_default": (tid == best_tid),
+                })
+
             result_dict = {
                 "session_id": session_id,
                 "video_filename": input_path.name,
                 "annotated_video_path": f"/api/video/annotated/{annotated_filename}",
                 "thumbnail_path": f"/api/video/thumbnail/{thumbnail_filename}",
                 "shot_type": active_shot,
+                "user_selected_shot": None if auto_detect_requested else shot_type,
                 "predicted_shot_type": predicted_shot,
                 "prediction_confidence": prediction_conf,
+                "is_uncertain": is_uncertain,
                 "shot_mismatch_warning": shot_mismatch_warning,
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
+                "striker_candidates": striker_candidates,
+                "striker_isolation_evidence": {
+                    "active_striker_id": active_striker_id,
+                    "role": striker_meta.get("role", "striker"),
+                    "confidence": striker_confidence,
+                    "selection_method": striker_select_method,
+                    "needs_confirmation": needs_confirmation,
+                    "cues": striker_evidence,
+                    "all_tracks": {
+                        t: {
+                            "role": meta.get("role"),
+                            "confidence": meta.get("confidence"),
+                            "striker_score": meta.get("striker_score")
+                        }
+                        for t, meta in track_classifications.items()
+                    }
+                },
+                "striker_tracking_status": f"Striker Track #{active_striker_id} Locked (Non-strikers Excluded)",
+                "tracking_dropout_warning": tracking_dropout_warning,
                 "user_confirmed_shot_type": None,
                 "shot_classification": classification_result,
+                "shot_confidence": shot_conf,
+                "coaching_paused": coaching_paused,
+                "pause_reason": pause_reason,
+                "plain_summary": getattr(eval_res, "plain_summary", {}) if eval_res is not None else {},
+                "issue_cards": getattr(eval_res, "issue_cards", []) if eval_res is not None else [],
                 "handedness": handedness,
                 "camera_angle": camera_angle,
                 "fps": round(float(fps), 2),
@@ -627,8 +800,8 @@ class VideoService:
                 "time_series": frame_metrics,
                 "metric_comparison_table": comparison_table,
                 "overall_technique_score": overall_score,
-                "top_mistakes": [m.model_dump() for m in top_mistakes],
-                "coaching_feedback": [f.model_dump() for f in all_obs],
+                "top_mistakes": [m.model_dump() if hasattr(m, "model_dump") else m for m in top_mistakes],
+                "coaching_feedback": [f.model_dump() if hasattr(f, "model_dump") else f for f in all_obs] if shot_tier == "supported" else ["Preview only: analysis coming soon"],
                 "limitations": limitations,
                 "model_metadata": model_metadata,
                 "validation_warnings": validation_warnings,
@@ -652,6 +825,46 @@ class VideoService:
                 cap.release()
             logger.exception(f"Error processing session {session_id}: {e}")
             session_repo.update_progress(session_id, "failed", 0.0, "Processing failure", str(e))
+
+    def reanalyze_shot(self, session_id: str, new_shot: str, lang: str = "en") -> Optional[Dict[str, Any]]:
+        """
+        Re-evaluates technique comparison, scores, and feedback for an existing session
+        against a newly selected shot type (e.g. when user clicks 'Analyse as Selected Shot').
+        """
+        session = session_repo.get_session(session_id)
+        if not session or not session.get("result"):
+            return None
+
+        result = dict(session["result"])
+        frame_metrics = result.get("time_series", [])
+        phases = result.get("phases", [])
+        summary = result.get("summary", {})
+        detected_view = result.get("detected_camera_view", "side-on")
+
+        eval_res = feedback_service.evaluate_technique(
+            frame_metrics, phases, summary, shot_type=new_shot, camera_view=detected_view, lang=lang
+        )
+        overall_score, top_mistakes, all_obs = eval_res
+        summary["overall_technique_score"] = overall_score
+
+        comparison_table = feedback_service.generate_comparison_table(
+            frame_metrics, shot_type=new_shot, camera_view=detected_view
+        )
+
+        result["shot_type"] = new_shot
+        result["overall_technique_score"] = overall_score
+        result["top_mistakes"] = [m.model_dump() for m in top_mistakes]
+        result["coaching_feedback"] = [f.model_dump() for f in all_obs]
+        result["metric_comparison_table"] = comparison_table
+        result["user_confirmed_shot_type"] = new_shot
+        result["coaching_paused"] = False
+        result["pause_reason"] = None
+        result["plain_summary"] = getattr(eval_res, "plain_summary", {})
+        result["issue_cards"] = getattr(eval_res, "issue_cards", [])
+
+        session_repo.update_result(session_id, result)
+        logger.info(f"Session {session_id} successfully re-analyzed as {new_shot}. New score: {overall_score:.1f}")
+        return result
 
     def _ensure_browser_compatible_video(self, video_path: Path):
         """
@@ -681,5 +894,13 @@ class VideoService:
                 temp_out.unlink()
         except Exception as e:
             logger.warning(f"Could not transcode {video_path} to H.264: {e}")
+
+    def override_striker(self, session_id: str, track_id: int):
+        """
+        Updates the selected striker track for this session and re-runs video processing.
+        """
+        session_repo.update_striker_track_id(session_id, track_id)
+        self.process_video_session(session_id)
+        return session_repo.get_session(session_id)
 
 video_service = VideoService()

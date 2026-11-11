@@ -49,20 +49,47 @@ export const EvaluationPage: React.FC = () => {
   if (loading) {
     return (
       <div className="max-w-7xl mx-auto px-4 py-16 text-center space-y-3">
-        <Activity className="w-8 h-8 text-brand-400 animate-spin mx-auto" />
-        <h3 className="text-sm font-semibold text-white">Loading Research Model Benchmarks...</h3>
+        <Activity className="w-8 h-8 text-[#7FEA35] animate-spin mx-auto" />
+        <h3 className="text-sm font-semibold text-[#F5F5F5]">Loading Model Benchmarks...</h3>
       </div>
     );
   }
 
-  if (error || !report) {
+  if (error || !report || !report.has_empirical_data) {
+    const minRequired = report?.min_required_per_shot ?? 8;
+    const clipCount = report?.labeled_clips_count ?? 0;
     return (
-      <div className="max-w-xl mx-auto px-4 py-16 text-center space-y-4">
-        <ShieldAlert className="w-8 h-8 text-amber-400 mx-auto" />
-        <h3 className="text-sm font-bold text-white">Evaluation Report Unavailable</h3>
-        <p className="text-xs text-slate-400">
-          Run the machine learning training script to generate experimental benchmarks.
-        </p>
+      <div className="max-w-2xl mx-auto px-4 py-20 text-center space-y-6">
+        <div className="w-16 h-16 rounded-2xl bg-[#181B1D] border border-[#303438] flex items-center justify-center mx-auto text-amber-400">
+          <ShieldAlert className="w-8 h-8" />
+        </div>
+        <div className="space-y-2">
+          <h2 className="text-xl font-extrabold text-[#F5F5F5] tracking-tight">
+            Classifier Evaluation Requires Empirical Data
+          </h2>
+          <p className="text-xs text-[#A5A9AD] max-w-lg mx-auto leading-relaxed">
+            Classifier evaluation requires at least {minRequired} labelled clips per shot. Current labelled clips: {clipCount}. Run <code className="text-[#7FEA35] bg-[#111315] px-1.5 py-0.5 rounded border border-[#303438]">scripts/evaluate_classifier.py</code> once data is added.
+          </p>
+        </div>
+
+        <div className="bg-[#181B1D] border border-[#303438] rounded-2xl p-6 text-left max-w-lg mx-auto space-y-4 font-mono text-xs shadow-xl">
+          <div className="flex items-center justify-between border-b border-[#303438] pb-3">
+            <span className="text-[#A5A9AD]">Empirical Validation Status</span>
+            <span className="text-amber-400 font-bold">Unvalidated</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[#A5A9AD]">Labelled Clips in Repository:</span>
+            <span className="text-[#F5F5F5] font-bold">{clipCount}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[#A5A9AD]">Required per Supported Shot:</span>
+            <span className="text-[#7FEA35] font-bold">≥ {minRequired} clips (≥ 2 batters)</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-[#A5A9AD]">Evaluation Script:</span>
+            <span className="text-sky-400">scripts/evaluate_classifier.py</span>
+          </div>
+        </div>
       </div>
     );
   }

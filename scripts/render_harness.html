@@ -1,0 +1,745 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>CricketIQ Avatar Proof Renderer</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 0;
+      background: #0B0E14;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, monospace;
+      color: #F5F5F5;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+    }
+    #canvas {
+      display: block;
+      background: #0B0E14;
+    }
+  </style>
+</head>
+<body>
+  <canvas id="canvas" width="800" height="500"></canvas>
+
+  <script>
+    // Embedded shotAnimations will be injected or fetched
+    window.SHOTS = {};
+
+    const PHASES = ['stance', 'backlift', 'stride', 'downswing', 'impact', 'follow_through', 'recovery'];
+
+    function projectPoint3D(pos, view, hand, w, h) {
+      let [x, y, z] = pos;
+      if (hand === 'Left') z = -z;
+
+      let angleRad = 0;
+      if (view === 'front') {
+        angleRad = -Math.PI / 2;
+      } else if (view === 'perspective') {
+        angleRad = -45 * (Math.PI / 180);
+      } else {
+        angleRad = -8 * (Math.PI / 180); // Natural broadcast side parallax
+      }
+
+      const cosA = Math.cos(angleRad);
+      const sinA = Math.sin(angleRad);
+      const xProj = x * cosA - z * sinA;
+      const zDepth = x * sinA + z * cosA;
+
+      const groundY = h * 0.82;
+      const scale = h * 0.42;
+      const originX = w * (view === 'front' ? 0.50 : 0.46);
+
+      return {
+        x: originX + xProj * scale,
+        y: groundY - y * scale,
+        depth: zDepth
+      };
+    }
+
+    function calculatePose(shot, phaseKey, view = 'side', hand = 'Right', w = 800, h = 500) {
+      const phaseObj = shot.phases[phaseKey] || shot.phases['impact'];
+      const p = (pt) => projectPoint3D(pt, view, hand, w, h);
+      const scale = h * 0.42;
+
+      let hip3D, chest3D, head3D, neck3D, leadSh3D, leadEl3D, leadWr3D, rearSh3D, rearEl3D, rearWr3D;
+      let leadHip3D, leadKnee3D, leadFoot3D, leadAnkle3D, rearHip3D, rearKnee3D, rearFoot3D, rearAnkle3D;
+      let batAngleDeg, batTip3D, isReverseSweep, isHandsSwitched;
+      let headAngleDeg, torsoAngleDeg, bladeFaceDeg, kf;
+
+      if (phaseObj.keyframe_pose) {
+        kf = phaseObj.keyframe_pose;
+        const hip_x = kf.hip_x;
+        const hip_y = kf.hip_y;
+        const lead_stride_x = kf.lead_stride_x;
+        const lead_stride_dir_deg = kf.lead_stride_dir_deg;
+        const rear_foot_x = kf.rear_foot_x;
+        const rear_foot_mode = kf.rear_foot_mode;
+        const lead_knee_flex = kf.lead_knee_flex;
+        const rear_knee_flex = kf.rear_knee_flex;
+        const lead_elbow_flex = kf.lead_elbow_flex;
+        const rear_elbow_flex = kf.rear_elbow_flex;
+        const pelvis_rotation_deg = kf.pelvis_rotation_deg;
+        const shoulder_rotation_deg = kf.shoulder_rotation_deg;
+        const head_offset_x = kf.head_offset_x;
+        const hands_x = kf.hands_x;
+        const hands_y = kf.hands_y;
+        const bat_angle = kf.bat_angle;
+        const bat_tip_x = kf.bat_tip_x;
+        const bat_tip_y = kf.bat_tip_y;
+        const torso_lean = kf.torso_lean;
+        const shoulder_tilt = kf.shoulder_tilt;
+        const bat_plane = kf.bat_plane;
+
+        // 1. Pelvis and Hips
+        hip3D = [hip_x, hip_y, 0];
+        const pelvisRad = (pelvis_rotation_deg * Math.PI) / 180;
+        const hipW = 0.10;
+        leadHip3D = [hip3D[0] + hipW * Math.sin(pelvisRad), hip3D[1], hipW * Math.cos(pelvisRad)];
+        rearHip3D = [hip3D[0] - hipW * Math.sin(pelvisRad), hip3D[1], -hipW * Math.cos(pelvisRad)];
+
+        // 2. Lead Leg
+        const strideRad = (lead_stride_dir_deg * Math.PI) / 180;
+        leadFoot3D = [hip_x + lead_stride_x * Math.cos(strideRad), 0.05, lead_stride_x * Math.sin(strideRad)];
+        const kneeFlexRad = (lead_knee_flex * Math.PI) / 180;
+        leadKnee3D = [
+          leadHip3D[0] + (leadFoot3D[0] - leadHip3D[0]) * 0.55 + 0.04 * Math.cos(kneeFlexRad / 2),
+          0.05 + 0.44 * Math.sin(kneeFlexRad / 2),
+          leadFoot3D[2] * 0.55 + hipW * 0.5
+        ];
+        leadAnkle3D = [leadFoot3D[0], 0.11, leadFoot3D[2]];
+
+        // 3. Rear Leg
+        const isRearKneeling = rear_foot_mode === 'kneeling';
+        if (isRearKneeling) {
+          rearFoot3D = [rear_foot_x - 0.22, 0.05, -0.12];
+          rearKnee3D = [rear_foot_x, 0.07, -0.10];
+        } else if (rear_foot_mode === 'drags') {
+          rearFoot3D = [rear_foot_x + 0.12, 0.05, -0.12];
+          const rKneeRad = (rear_knee_flex * Math.PI) / 180;
+          rearKnee3D = [
+            rearHip3D[0] + (rearFoot3D[0] - rearHip3D[0]) * 0.48,
+            0.05 + 0.44 * Math.sin(rKneeRad / 2),
+            -0.12
+          ];
+        } else {
+          rearFoot3D = [rear_foot_x, 0.05, rear_foot_mode === 'back-and-across' ? -0.16 : -0.12];
+          const rKneeRad = (rear_knee_flex * Math.PI) / 180;
+          rearKnee3D = [
+            rearHip3D[0] + (rearFoot3D[0] - rearHip3D[0]) * 0.5,
+            0.05 + 0.44 * Math.sin(rKneeRad / 2),
+            rearFoot3D[2]
+          ];
+        }
+        rearAnkle3D = [rearFoot3D[0], isRearKneeling ? 0.07 : 0.11, rearFoot3D[2]];
+
+        // 4. Torso & Head
+        const leanRad = (torso_lean * Math.PI) / 180;
+        const tiltRad = (shoulder_tilt * Math.PI) / 180;
+        const torsoLen = 0.44;
+        chest3D = [hip3D[0] + torsoLen * Math.sin(leanRad), hip3D[1] + torsoLen * Math.cos(leanRad), torsoLen * Math.sin(tiltRad)];
+        neck3D = [chest3D[0] + 0.09 * Math.sin(leanRad), chest3D[1] + 0.09 * Math.cos(leanRad), chest3D[2]];
+        head3D = [neck3D[0] + 0.14 * Math.sin(leanRad) + head_offset_x, neck3D[1] + 0.14, neck3D[2]];
+
+        const shRad = (shoulder_rotation_deg * Math.PI) / 180;
+        const shW = 0.19;
+        leadSh3D = [chest3D[0] + shW * Math.sin(shRad), chest3D[1] - 0.01, chest3D[2] + shW * Math.cos(shRad)];
+        rearSh3D = [chest3D[0] - shW * Math.sin(shRad), chest3D[1] + 0.01, chest3D[2] - shW * Math.cos(shRad)];
+
+        let handsZ = chest3D[2] + 0.10 * Math.cos(shRad);
+        let tipZ = handsZ + 0.02;
+        if (bat_plane === 'horizontal') {
+          handsZ = chest3D[2] + 0.18 * Math.cos(shRad);
+          tipZ = handsZ + 0.28 * Math.sin((bat_angle * Math.PI) / 180);
+        } else if (bat_plane === 'diagonal') {
+          handsZ = chest3D[2] + 0.14 * Math.cos(shRad);
+          tipZ = handsZ + 0.18 * Math.sin(strideRad);
+        }
+        leadWr3D = [hands_x, hands_y, handsZ];
+        rearWr3D = [hands_x, hands_y, handsZ];
+        batTip3D = [bat_tip_x, bat_tip_y, tipZ];
+        batAngleDeg = bat_angle;
+        headAngleDeg = Math.round(torso_lean * 0.4);
+        torsoAngleDeg = Math.round(torso_lean);
+        bladeFaceDeg = Math.round(bat_angle);
+        isReverseSweep = (shot.slug || shot.name || '').toLowerCase().includes('reverse');
+      } else {
+        kf = phaseObj;
+        hip3D = kf.torso.hip;
+        chest3D = kf.torso.chest;
+        head3D = [kf.head.x, kf.head.y, kf.head.z];
+        neck3D = [chest3D[0] + (head3D[0] - chest3D[0]) * 0.45, chest3D[1] + (head3D[1] - chest3D[1]) * 0.45, chest3D[2] + (head3D[2] - chest3D[2]) * 0.45];
+        leadSh3D = kf.leadArm.shoulderPos;
+        leadEl3D = kf.leadArm.elbowPos;
+        leadWr3D = kf.leadArm.wristPos;
+        rearSh3D = kf.rearArm.shoulderPos;
+        rearEl3D = kf.rearArm.elbowPos;
+        rearWr3D = kf.rearArm.wristPos;
+        leadHip3D = [hip3D[0] + 0.08, hip3D[1], hip3D[2] + 0.10];
+        leadKnee3D = kf.leadLeg.kneePos;
+        leadFoot3D = kf.leadLeg.footPos;
+        leadAnkle3D = [leadFoot3D[0], leadFoot3D[1] + 0.08, leadFoot3D[2]];
+        rearHip3D = [hip3D[0] - 0.08, hip3D[1], hip3D[2] - 0.10];
+        rearKnee3D = kf.rearLeg.kneePos;
+        rearFoot3D = kf.rearLeg.footPos;
+        rearAnkle3D = [rearFoot3D[0], rearFoot3D[1] + 0.08, rearFoot3D[2]];
+        batAngleDeg = kf.bat.angleDeg;
+        batTip3D = kf.bat.tipPos;
+        headAngleDeg = kf.head.tiltDeg;
+        torsoAngleDeg = kf.torso.leanDeg;
+        bladeFaceDeg = kf.bat.bladeFaceDeg;
+        isReverseSweep = (shot.name || '').toLowerCase().includes('reverse sweep');
+      }
+
+      isHandsSwitched = isReverseSweep;
+      const leadWristP = p(leadWr3D);
+      const rearWristP = p(rearWr3D);
+      const tipP = p(batTip3D);
+      const leadShoulderP = p(leadSh3D);
+      const rearShoulderP = p(rearSh3D);
+
+      const batLength = scale * 0.92;
+      const dx = tipP.x - leadWristP.x;
+      const dy = tipP.y - leadWristP.y;
+      const handDist = Math.hypot(dx, dy);
+
+      let ux, uy;
+      if (handDist > 10) {
+        ux = dx / handDist;
+        uy = dy / handDist;
+      } else {
+        const rad = (batAngleDeg * Math.PI) / 180;
+        ux = Math.sin(rad);
+        uy = -Math.cos(rad);
+      }
+
+      const buttEnd = {
+        x: leadWristP.x - ux * (batLength * 0.05),
+        y: leadWristP.y - uy * (batLength * 0.05),
+        depth: leadWristP.depth
+      };
+
+      const topHandGrip = leadWristP;
+      const bottomHandGrip = {
+        x: leadWristP.x + ux * (batLength * 0.16),
+        y: leadWristP.y + uy * (batLength * 0.16),
+        depth: leadWristP.depth
+      };
+
+      const handleEnd = {
+        x: buttEnd.x + ux * (batLength * 0.30),
+        y: buttEnd.y + uy * (batLength * 0.30),
+        depth: leadWristP.depth
+      };
+
+      const bladeShoulders = {
+        x: buttEnd.x + ux * (batLength * 0.36),
+        y: buttEnd.y + uy * (batLength * 0.36),
+        depth: leadWristP.depth
+      };
+
+      const toe = {
+        x: buttEnd.x + ux * batLength,
+        y: buttEnd.y + uy * batLength,
+        depth: tipP.depth
+      };
+
+      let topHandPt, bottomHandPt;
+      if (!isHandsSwitched) {
+        topHandPt = topHandGrip;
+        bottomHandPt = bottomHandGrip;
+      } else {
+        topHandPt = bottomHandGrip;
+        bottomHandPt = topHandGrip;
+      }
+
+      // Compute elbows
+      const computeElbow = (sh, wr, flexDeg, isLeadArm) => {
+        const midX = (sh.x + wr.x) / 2;
+        const midY = (sh.y + wr.y) / 2;
+        const armLen = Math.hypot(wr.x - sh.x, wr.y - sh.y);
+        const perpX = -(wr.y - sh.y) / Math.max(1, armLen);
+        const perpY = (wr.x - sh.x) / Math.max(1, armLen);
+        const flexOffset = Math.sin((flexDeg * Math.PI) / 360) * (scale * 0.18);
+        const sign = isLeadArm ? 1 : -1;
+        return {
+          x: midX + perpX * flexOffset * sign,
+          y: midY + perpY * flexOffset * sign,
+          depth: (sh.depth + wr.depth) / 2
+        };
+      };
+
+      const leadElbowP = leadEl3D ? p(leadEl3D) : computeElbow(leadShoulderP, leadWristP, kf.lead_elbow_flex || 100, true);
+      const rearElbowP = rearEl3D ? p(rearEl3D) : computeElbow(rearShoulderP, rearWristP, kf.rear_elbow_flex || 90, false);
+
+      return {
+        hipCenter: p(hip3D),
+        chest: p(chest3D),
+        neck: p(neck3D),
+        head: p(head3D),
+        headAngleDeg,
+        torsoAngleDeg,
+        leadShoulder: leadShoulderP,
+        leadElbow: leadElbowP,
+        leadWrist: leadWristP,
+        rearShoulder: rearShoulderP,
+        rearElbow: rearElbowP,
+        rearWrist: rearWristP,
+        leadHip: p(leadHip3D),
+        leadKnee: p(leadKnee3D),
+        leadAnkle: p(leadAnkle3D),
+        leadFoot: p(leadFoot3D),
+        rearHip: p(rearHip3D),
+        rearKnee: p(rearKnee3D),
+        rearAnkle: p(rearAnkle3D),
+        rearFoot: p(rearFoot3D),
+        topHandGrip,
+        bottomHandGrip,
+        buttEnd,
+        handleEnd,
+        bladeShoulders,
+        toe,
+        batAxis: { x: ux, y: uy },
+        batLength,
+        bladeFaceDeg,
+        isHandsSwitched,
+        kf
+      };
+    }
+
+    function drawPitchAndEnvironment(ctx, w, h) {
+      const groundY = h * 0.82;
+
+      // Dark futuristic cricket pitch grass
+      const grassGrad = ctx.createLinearGradient(0, groundY - 80, 0, h);
+      grassGrad.addColorStop(0, '#0F1A15');
+      grassGrad.addColorStop(0.3, '#12231C');
+      grassGrad.addColorStop(1, '#09120E');
+      ctx.fillStyle = grassGrad;
+      ctx.fillRect(0, groundY - 40, w, h - (groundY - 40));
+
+      // Crease turf strip
+      const pitchGrad = ctx.createLinearGradient(0, groundY - 30, 0, groundY + 80);
+      pitchGrad.addColorStop(0, '#1E2922');
+      pitchGrad.addColorStop(0.5, '#2A3B31');
+      pitchGrad.addColorStop(1, '#1A241E');
+      ctx.fillStyle = pitchGrad;
+      ctx.beginPath();
+      ctx.ellipse(w * 0.48, groundY + 25, w * 0.45, 60, 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Popping Crease Line
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.15, groundY);
+      ctx.lineTo(w * 0.85, groundY);
+      ctx.stroke();
+
+      // Return Crease marks
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(w * 0.28, groundY - 20);
+      ctx.lineTo(w * 0.28, groundY + 45);
+      ctx.moveTo(w * 0.68, groundY - 20);
+      ctx.lineTo(w * 0.68, groundY + 45);
+      ctx.stroke();
+    }
+
+    function drawStumps(ctx, pose, w, h) {
+      const groundY = h * 0.82;
+      const stumpX = w * 0.32;
+      const stumpH = 75;
+      const stumpW = 6;
+      const gap = 8;
+
+      ctx.save();
+      for (let i = 0; i < 3; i++) {
+        const sx = stumpX + i * (stumpW + gap);
+        ctx.fillStyle = '#D4A373';
+        ctx.fillRect(sx, groundY - stumpH, stumpW, stumpH);
+        ctx.strokeStyle = '#8C5A2B';
+        ctx.lineWidth = 1;
+        ctx.strokeRect(sx, groundY - stumpH, stumpW, stumpH);
+      }
+      // Bails
+      ctx.fillStyle = '#C89666';
+      ctx.fillRect(stumpX - 2, groundY - stumpH - 4, (stumpW + gap) * 2 + stumpW + 4, 4);
+      ctx.restore();
+    }
+
+    function drawRealisticBatter(ctx, pose) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+
+      const drawLimb = (p1, p2, w1, w2, fill, stroke) => {
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.hypot(dx, dy);
+        if (len < 1) return;
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        ctx.beginPath();
+        ctx.moveTo(p1.x + nx * (w1 / 2), p1.y + ny * (w1 / 2));
+        ctx.lineTo(p2.x + nx * (w2 / 2), p2.y + ny * (w2 / 2));
+        ctx.lineTo(p2.x - nx * (w2 / 2), p2.y - ny * (w2 / 2));
+        ctx.lineTo(p1.x - nx * (w1 / 2), p1.y - ny * (w1 / 2));
+        ctx.closePath();
+        ctx.fillStyle = fill;
+        ctx.fill();
+        ctx.strokeStyle = stroke;
+        ctx.lineWidth = 1.2;
+        ctx.stroke();
+      };
+
+      // 1. Rear Leg & Pads
+      drawLimb(pose.rearHip, pose.rearKnee, 22, 18, '#F1F5F9', '#CBD5E1');
+      // Batting pad on rear leg
+      drawLimb(pose.rearKnee, pose.rearAnkle, 24, 20, '#FFFFFF', '#94A3B8');
+      // Rear Foot / Spike shoe
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.ellipse(pose.rearFoot.x + 4, pose.rearFoot.y, 14, 7, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#0F172A';
+      ctx.stroke();
+
+      // 2. Rear Arm
+      drawLimb(pose.rearShoulder, pose.rearElbow, 16, 14, '#F8FAFC', '#CBD5E1');
+      drawLimb(pose.rearElbow, pose.rearWrist, 14, 12, '#F8FAFC', '#CBD5E1');
+
+      // 3. Torso / Jersey
+      ctx.beginPath();
+      ctx.moveTo(pose.leadShoulder.x, pose.leadShoulder.y);
+      ctx.lineTo(pose.rearShoulder.x, pose.rearShoulder.y);
+      ctx.lineTo(pose.rearHip.x, pose.rearHip.y);
+      ctx.lineTo(pose.leadHip.x, pose.leadHip.y);
+      ctx.closePath();
+      const torsoGrad = ctx.createLinearGradient(pose.chest.x, pose.chest.y - 30, pose.hipCenter.x, pose.hipCenter.y);
+      torsoGrad.addColorStop(0, '#FFFFFF');
+      torsoGrad.addColorStop(0.8, '#F1F5F9');
+      torsoGrad.addColorStop(1, '#E2E8F0');
+      ctx.fillStyle = torsoGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#0284C7'; // Cyan trim
+      ctx.lineWidth = 2;
+      ctx.stroke();
+
+      // 4. Front Leg & Front Batting Pad
+      drawLimb(pose.leadHip, pose.leadKnee, 24, 20, '#F1F5F9', '#CBD5E1');
+      // Lead leg prominent front pad
+      drawLimb(pose.leadKnee, pose.leadAnkle, 26, 22, '#FFFFFF', '#64748B');
+      // Knee roll rib lines
+      ctx.strokeStyle = '#94A3B8';
+      ctx.lineWidth = 1.5;
+      for (let r = -8; r <= 8; r += 5) {
+        ctx.beginPath();
+        ctx.moveTo(pose.leadKnee.x - 10, pose.leadKnee.y + r);
+        ctx.lineTo(pose.leadKnee.x + 10, pose.leadKnee.y + r);
+        ctx.stroke();
+      }
+      // Lead Foot Spike
+      ctx.fillStyle = '#FFFFFF';
+      ctx.beginPath();
+      ctx.ellipse(pose.leadFoot.x + 6, pose.leadFoot.y, 16, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.strokeStyle = '#0F172A';
+      ctx.stroke();
+
+      // 5. Front Arm
+      drawLimb(pose.leadShoulder, pose.leadElbow, 17, 15, '#FFFFFF', '#CBD5E1');
+      drawLimb(pose.leadElbow, pose.leadWrist, 15, 12, '#FFFFFF', '#CBD5E1');
+
+      // 6. Neck & Helmet
+      ctx.beginPath();
+      ctx.moveTo(pose.chest.x, pose.chest.y);
+      ctx.lineTo(pose.neck.x, pose.neck.y);
+      ctx.lineWidth = 14;
+      ctx.strokeStyle = '#FCD34D';
+      ctx.stroke();
+
+      // Helmet Dome (Navy Cricket Helmet)
+      ctx.beginPath();
+      ctx.arc(pose.head.x, pose.head.y, 18, 0, Math.PI * 2);
+      const helmGrad = ctx.createRadialGradient(pose.head.x - 4, pose.head.y - 6, 2, pose.head.x, pose.head.y, 20);
+      helmGrad.addColorStop(0, '#1E3A8A');
+      helmGrad.addColorStop(1, '#0F172A');
+      ctx.fillStyle = helmGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Helmet Peak
+      ctx.beginPath();
+      ctx.moveTo(pose.head.x + 10, pose.head.y - 4);
+      ctx.lineTo(pose.head.x + 28, pose.head.y + 4);
+      ctx.lineWidth = 3.5;
+      ctx.strokeStyle = '#0F172A';
+      ctx.stroke();
+
+      // Steel Face Grille
+      ctx.strokeStyle = '#94A3B8';
+      ctx.lineWidth = 1.8;
+      ctx.beginPath();
+      ctx.moveTo(pose.head.x + 6, pose.head.y + 2);
+      ctx.lineTo(pose.head.x + 22, pose.head.y + 12);
+      ctx.lineTo(pose.head.x + 14, pose.head.y + 22);
+      ctx.stroke();
+
+      ctx.restore();
+    }
+
+    function drawBat(ctx, pose) {
+      const { buttEnd, handleEnd, bladeShoulders, toe, topHandGrip, bottomHandGrip, batAxis } = pose;
+      const perp = { x: -batAxis.y, y: batAxis.x };
+
+      ctx.save();
+
+      // 1. HANDLE
+      const handleW = 7;
+      ctx.beginPath();
+      ctx.moveTo(buttEnd.x - perp.x * (handleW / 2), buttEnd.y - perp.y * (handleW / 2));
+      ctx.lineTo(handleEnd.x - perp.x * (handleW / 2), handleEnd.y - perp.y * (handleW / 2));
+      ctx.lineTo(handleEnd.x + perp.x * (handleW / 2), handleEnd.y + perp.y * (handleW / 2));
+      ctx.lineTo(buttEnd.x + perp.x * (handleW / 2), buttEnd.y + perp.y * (handleW / 2));
+      ctx.closePath();
+
+      const handleGrad = ctx.createLinearGradient(buttEnd.x, buttEnd.y, handleEnd.x, handleEnd.y);
+      handleGrad.addColorStop(0, '#FFFFFF');
+      handleGrad.addColorStop(0.5, '#E2E8F0');
+      handleGrad.addColorStop(1, '#0284C7');
+      ctx.fillStyle = handleGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#0F172A';
+      ctx.lineWidth = 1;
+      ctx.stroke();
+
+      // Rubber Butt Cap
+      ctx.beginPath();
+      ctx.arc(buttEnd.x, buttEnd.y, handleW * 0.65, 0, Math.PI * 2);
+      ctx.fillStyle = '#0F172A';
+      ctx.fill();
+
+      // 2. WILLOW BLADE
+      const bladeW = 19;
+      const toeW = 17;
+
+      ctx.beginPath();
+      ctx.moveTo(handleEnd.x - perp.x * (handleW / 2), handleEnd.y - perp.y * (handleW / 2));
+      ctx.quadraticCurveTo(
+        bladeShoulders.x - perp.x * (bladeW * 0.8), bladeShoulders.y - perp.y * (bladeW * 0.8),
+        bladeShoulders.x - perp.x * (bladeW / 2), bladeShoulders.y - perp.y * (bladeW / 2)
+      );
+      ctx.lineTo(toe.x - perp.x * (toeW / 2), toe.y - perp.y * (toeW / 2));
+      ctx.quadraticCurveTo(
+        toe.x, toe.y + 4,
+        toe.x + perp.x * (toeW / 2), toe.y + perp.y * (toeW / 2)
+      );
+      ctx.lineTo(bladeShoulders.x + perp.x * (bladeW / 2), bladeShoulders.y + perp.y * (bladeW / 2));
+      ctx.quadraticCurveTo(
+        bladeShoulders.x + perp.x * (bladeW * 0.8), bladeShoulders.y + perp.y * (bladeW * 0.8),
+        handleEnd.x + perp.x * (handleW / 2), handleEnd.y + perp.y * (handleW / 2)
+      );
+      ctx.closePath();
+
+      const bladeGrad = ctx.createLinearGradient(handleEnd.x, handleEnd.y, toe.x, toe.y);
+      bladeGrad.addColorStop(0, '#FDE68A');
+      bladeGrad.addColorStop(0.3, '#FCD34D');
+      bladeGrad.addColorStop(0.85, '#F59E0B');
+      bladeGrad.addColorStop(1, '#D97706');
+      ctx.fillStyle = bladeGrad;
+      ctx.fill();
+      ctx.strokeStyle = '#B45309';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // Bat spine / center ridge
+      ctx.beginPath();
+      ctx.moveTo(bladeShoulders.x, bladeShoulders.y);
+      ctx.lineTo(toe.x, toe.y);
+      ctx.strokeStyle = 'rgba(180, 83, 9, 0.45)';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 3. BATTING GLOVES STRICTLY ON HANDLE
+      const drawGlove = (pt, label) => {
+        ctx.beginPath();
+        ctx.arc(pt.x, pt.y, 9.5, 0, Math.PI * 2);
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fill();
+        ctx.strokeStyle = '#0F172A';
+        ctx.lineWidth = 2;
+        ctx.stroke();
+
+        // Sausage padding ridges
+        ctx.strokeStyle = '#0284C7';
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(pt.x - 5, pt.y - 3);
+        ctx.lineTo(pt.x + 5, pt.y - 3);
+        ctx.moveTo(pt.x - 5, pt.y + 2);
+        ctx.lineTo(pt.x + 5, pt.y + 2);
+        ctx.stroke();
+      };
+
+      drawGlove(topHandGrip, 'Top Hand');
+      drawGlove(bottomHandGrip, 'Bottom Hand');
+
+      ctx.restore();
+    }
+
+    function drawDebug(ctx, pose) {
+      const { buttEnd, handleEnd, bladeShoulders, toe, topHandGrip, bottomHandGrip, batAxis } = pose;
+      ctx.save();
+
+      // 1. Bat Axis Vector Arrow
+      ctx.beginPath();
+      ctx.moveTo(buttEnd.x, buttEnd.y);
+      ctx.lineTo(toe.x + batAxis.x * 24, toe.y + batAxis.y * 24);
+      ctx.strokeStyle = '#00FFFF';
+      ctx.lineWidth = 2.5;
+      ctx.setLineDash([4, 3]);
+      ctx.stroke();
+      ctx.setLineDash([]);
+
+      // Arrow head
+      const arrowTip = { x: toe.x + batAxis.x * 24, y: toe.y + batAxis.y * 24 };
+      ctx.beginPath();
+      ctx.fillStyle = '#00FFFF';
+      ctx.arc(arrowTip.x, arrowTip.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // 2. Butt End Indicator (0%)
+      ctx.beginPath();
+      ctx.arc(buttEnd.x, buttEnd.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#FF00FF';
+      ctx.fill();
+      ctx.strokeStyle = '#FFFFFF';
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+
+      // 3. Top Hand Grip (5%)
+      ctx.beginPath();
+      ctx.arc(topHandGrip.x, topHandGrip.y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#7FEA35';
+      ctx.fill();
+      ctx.stroke();
+
+      // 4. Bottom Hand Grip (21%)
+      ctx.beginPath();
+      ctx.arc(bottomHandGrip.x, bottomHandGrip.y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#F59E0B';
+      ctx.fill();
+      ctx.stroke();
+
+      // 5. Handle Joint (30%)
+      ctx.beginPath();
+      ctx.arc(handleEnd.x, handleEnd.y, 4.5, 0, Math.PI * 2);
+      ctx.fillStyle = '#38BDF8';
+      ctx.fill();
+      ctx.stroke();
+
+      // 6. Bat Toe (100%)
+      ctx.beginPath();
+      ctx.arc(toe.x, toe.y, 5, 0, Math.PI * 2);
+      ctx.fillStyle = '#EF4444';
+      ctx.fill();
+      ctx.stroke();
+
+      // Distances check
+      const dTopButt = Math.hypot(topHandGrip.x - buttEnd.x, topHandGrip.y - buttEnd.y);
+      const dTopToe = Math.hypot(topHandGrip.x - toe.x, topHandGrip.y - toe.y);
+      const gripValid = dTopButt < dTopToe;
+
+      ctx.fillStyle = gripValid ? '#7FEA35' : '#EF4444';
+      ctx.font = 'bold 11px monospace';
+      ctx.fillText(`GRIP: ${gripValid ? '✓ HANDLE (TOP)' : 'FAIL'}`, buttEnd.x + 12, buttEnd.y - 12);
+      ctx.fillText(`AXIS: [${batAxis.x.toFixed(2)}, ${batAxis.y.toFixed(2)}]`, buttEnd.x + 12, buttEnd.y + 2);
+
+      ctx.restore();
+    }
+
+    window.renderToCanvas = function(shotName, phaseKey, options = {}) {
+      const canvas = document.getElementById('canvas');
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+
+      ctx.clearRect(0, 0, w, h);
+
+      const shot = window.SHOTS[shotName];
+      if (!shot) {
+        ctx.fillStyle = '#EF4444';
+        ctx.font = 'bold 20px monospace';
+        ctx.fillText(`Shot "${shotName}" not found`, 50, 100);
+        return;
+      }
+
+      const view = options.view || 'side';
+      const hand = options.hand || 'Right';
+      const debug = options.debug !== false;
+      const title = options.title || shotName;
+      const phaseLabel = options.phaseLabel || phaseKey.toUpperCase();
+
+      drawPitchAndEnvironment(ctx, w, h);
+
+      const pose = calculatePose(shot, phaseKey, view, hand, w, h);
+      drawStumps(ctx, pose, w, h);
+      drawRealisticBatter(ctx, pose);
+      drawBat(ctx, pose);
+
+      if (debug) {
+        drawDebug(ctx, pose);
+      }
+
+      // Title & Header badge
+      ctx.save();
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.strokeStyle = '#38BDF8';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.roundRect(20, 20, 360, 52, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#7FEA35';
+      ctx.font = 'bold 14px monospace';
+      ctx.fillText(title.toUpperCase(), 32, 42);
+
+      const swingPlaneStr = shot.swingPlane ? shot.swingPlane : (pose.kf.bat_plane || 'standard');
+      ctx.fillStyle = '#94A3B8';
+      ctx.font = '11px monospace';
+      ctx.fillText(`PHASE: ${phaseLabel} | PLANE: ${swingPlaneStr.toUpperCase()}`, 32, 60);
+
+      // Biomechanical metrics overlay
+      ctx.fillStyle = 'rgba(15, 23, 42, 0.85)';
+      ctx.strokeStyle = '#334155';
+      ctx.beginPath();
+      ctx.roundRect(w - 240, 20, 220, 70, 8);
+      ctx.fill();
+      ctx.stroke();
+
+      ctx.fillStyle = '#38BDF8';
+      ctx.font = 'bold 10px monospace';
+      ctx.fillText('BIOMECHANICAL METRICS', w - 228, 38);
+
+      const kneeFlexVal = pose.kf.leadLeg ? pose.kf.leadLeg.kneeAngleDeg : (pose.kf.lead_knee_flex || 120);
+      const batAngVal = pose.kf.bat ? pose.kf.bat.angleDeg : (pose.kf.bat_angle || 0);
+      const torsoLeanVal = pose.kf.torso ? pose.kf.torso.leanDeg : (pose.kf.torso_lean || 15);
+
+      ctx.fillStyle = '#F5F5F5';
+      ctx.font = '10px monospace';
+      ctx.fillText(`Knee Flexion:  ${kneeFlexVal}°`, w - 228, 54);
+      ctx.fillText(`Bat Plane Angle: ${batAngVal}°`, w - 228, 68);
+      ctx.fillText(`Torso Lean:    ${torsoLeanVal}°`, w - 228, 82);
+
+      ctx.restore();
+    };
+  </script>
+</body>
+</html>

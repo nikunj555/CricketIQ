@@ -232,8 +232,7 @@ class ProgressService:
             status = "same"
 
             if prev_values:
-                avg_prev = float(np.mean(prev_values))
-                prev_dev = calc_dev(avg_prev)
+                prev_dev = float(np.mean([calc_dev(v) for v in prev_values]))
                 dev_diff = prev_dev - curr_dev  # positive means improved
 
                 if dev_diff >= 2.0:
@@ -263,6 +262,90 @@ class ProgressService:
                 "status": status,
                 "previous_values": [round(float(v), 1) for v in prev_values],
                 "deviation_from_ideal": round(float(curr_dev), 1),
+            })
+
+        # Plain-words progress tracking statements (e.g., 'Front knee: fixed in your last 3 attempts')
+        plain_progress_statements: List[Dict[str, Any]] = []
+        body_part_names = {
+            "lead_knee_flexion_at_impact": "Front knee",
+            "torso_lean_at_impact": "Upper body lean",
+            "lead_elbow_flexion_at_impact": "Front elbow",
+            "head_stability_index": "Head position",
+            "stance_width_ratio_max": "Front step",
+        }
+
+        for metric_key, label, unit, direction, ref_key in TRACKED_METRICS:
+            if metric_key not in body_part_names:
+                continue
+            friendly_name = body_part_names[metric_key]
+            values = [p[metric_key] for p in trend_data if p.get(metric_key) is not None]
+            if not values:
+                continue
+
+            ref_spec = reference_service.get_phase_ideal_range(canonical_shot, "impact", ref_key) if ref_key else None
+            ideal_min = float(ref_spec["min"]) if ref_spec else None
+            ideal_max = float(ref_spec["max"]) if ref_spec else None
+
+            recent_vals = values[-5:]
+            is_good = []
+            for v in recent_vals:
+                if ideal_min is not None and ideal_max is not None:
+                    is_good.append(ideal_min <= v <= ideal_max)
+                else:
+                    is_good.append(True)
+
+            total_recent = len(recent_vals)
+            good_count = sum(1 for g in is_good if g)
+            bad_count = total_recent - good_count
+
+            if total_recent >= 3 and is_good[-3:] == [True, True, True]:
+                statement = f"{friendly_name}: fixed in your last 3 attempts"
+                trend_arrow = "↑"
+                trend_status = "improving"
+            elif bad_count >= 3:
+                statement = f"{friendly_name}: still a problem ({bad_count} of {total_recent} attempts)"
+                trend_arrow = "↓"
+                trend_status = "needs_work"
+            elif good_count == total_recent:
+                statement = f"{friendly_name}: consistently solid across all recent attempts"
+                trend_arrow = "→"
+                trend_status = "solid"
+            elif is_good[-1] and not is_good[0]:
+                statement = f"{friendly_name}: improving on your latest balls"
+                trend_arrow = "↑"
+                trend_status = "improving"
+            else:
+                statement = f"{friendly_name}: steady ({good_count} of {total_recent} on target)"
+                trend_arrow = "→"
+                trend_status = "steady"
+
+            plain_progress_statements.append({
+                "body_part": friendly_name,
+                "statement": statement,
+                "trend_arrow": trend_arrow,
+                "trend_status": trend_status,
+                "metric_key": metric_key
+            })
+
+        # Dual tracking: technique score vs shot recognition confidence (strictly separate lines)
+        dual_tracking = []
+        for s in matching_sorted:
+            res_d = s.get("result") or {}
+            sc = s.get("overall_technique_score") or res_d.get("overall_technique_score") or 75.0
+            shot_c = res_d.get("shot_confidence") or {}
+            c_pct = shot_c.get("confidence") or int((s.get("prediction_confidence") or 0.75) * 100)
+            c_lvl = shot_c.get("level") or ("Very sure" if c_pct >= 85 else ("Fairly sure" if c_pct >= 65 else "Not very sure"))
+
+            t_label = "solid" if sc >= 80 else ("getting there" if sc >= 65 else "needs work")
+            line = f"Technique: {sc:.0f} ({t_label}) · Shot recognized: {c_lvl} ({c_pct:.0f}%)"
+            dual_tracking.append({
+                "session_id": s.get("session_id"),
+                "date": (s.get("created_at") or "")[:10],
+                "technique_score": round(float(sc), 1),
+                "technique_label": t_label,
+                "shot_confidence_pct": round(float(c_pct), 0),
+                "shot_confidence_level": c_lvl,
+                "summary_line": line
             })
 
         # 3. Concise summary narrative sentence
@@ -323,6 +406,8 @@ class ProgressService:
             "score_trend": score_trend,
             "trend_data": trend_data,
             "metric_comparisons": metric_comparisons,
+            "plain_progress_statements": plain_progress_statements,
+            "dual_tracking": dual_tracking,
             "summary_sentence": summary_sentence,
             "recurring_mistakes": recurring_mistakes[:5],
             "is_trend_reliable": len(matching) >= MIN_SESSIONS_FOR_TREND,

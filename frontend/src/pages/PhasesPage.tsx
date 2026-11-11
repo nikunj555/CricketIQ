@@ -181,6 +181,8 @@ export const PhasesPage: React.FC<PhasesPageProps> = ({ sessionId, onSelectTab }
               </div>
               <RealisticBatterVisualizer
                 shotName={analysis.shot_type}
+                handedness={analysis.handedness === 'Left' ? 'Left' : 'Right'}
+                cameraView={analysis.camera_angle}
                 initialPhaseIndex={Math.min(selectedPhaseIdx, 6)}
                 showControls={true}
                 autoPlay={false}

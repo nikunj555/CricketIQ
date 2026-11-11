@@ -19,6 +19,7 @@ import {
 import { SessionListItem, SessionListResponse, NavTab } from '../types/cricket';
 import { api } from '../services/api';
 import { BrandLogo } from '../components/BrandLogo';
+import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface DashboardPageProps {
   onSelectTab: (tab: NavTab) => void;
@@ -35,6 +36,7 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
   const [healthInfo, setHealthInfo] = useState<any>(null);
   const [shotCount, setShotCount] = useState<number>(25);
   const [pingLatencyMs, setPingLatencyMs] = useState<number | null>(null);
+  const [activeStoryStage, setActiveStoryStage] = useState<number>(1);
 
   const loadData = async () => {
     try {
@@ -141,8 +143,8 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="flex items-center justify-between">
                 <span>Kinematic Models:</span>
                 <span className="text-[#F5F5F5]">
-                  {healthInfo?.models?.pose_estimator?.loaded && healthInfo?.models?.phase_classifier?.loaded
-                    ? 'Pose + BiLSTM'
+                  {healthInfo?.models?.pose_estimator?.loaded
+                    ? 'Pose + Kinematics'
                     : healthInfo ? 'Checking Models' : 'Offline'}
                 </span>
               </div>
@@ -184,7 +186,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
             <span className="text-xs uppercase font-semibold tracking-wider">Movement Tracking</span>
             <Layers className="w-4 h-4 text-sky-400" />
           </div>
-          <div className="text-lg font-bold font-mono text-[#F5F5F5]">Active & Ready</div>
+          <div className="text-lg font-bold font-mono text-[#F5F5F5]">
+            {healthInfo?.models?.pose_estimator?.loaded ? 'Active & Ready' : (healthInfo ? 'Degraded' : 'Offline')}
+          </div>
           <p className="text-[11px] text-[#A5A9AD]">Head, knees, elbows & stance alignment</p>
         </div>
 
@@ -204,6 +208,145 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
           </div>
           <div className="text-2xl font-bold font-mono text-[#F5F5F5]">Available</div>
           <p className="text-[11px] text-[#A5A9AD]">Compare against textbook standards</p>
+        </div>
+      </div>
+
+      {/* 2.5 The 4-Stage Biomechanical Engine Sequence */}
+      <div className="bg-[#111315] rounded-2xl border border-[#303438] p-6 space-y-6">
+        <div className="flex flex-col md:flex-row md:items-end justify-between gap-4 pb-4 border-b border-[#303438]">
+          <div className="space-y-1">
+            <div className="flex items-center space-x-2">
+              <Sparkles className="w-4 h-4 text-[#7FEA35]" />
+              <span className="text-xs font-mono uppercase tracking-wider text-[#7FEA35] font-bold">
+                Biomechanics Engine
+              </span>
+            </div>
+            <h2 className="text-xl font-extrabold text-[#F5F5F5] tracking-tight">
+              How CricketIQ Analyzes Your Batting Technique
+            </h2>
+            <p className="text-xs text-[#A5A9AD]">
+              Tournament-grade computer vision and dynamic time warping break every delivery down into explainable biomechanics.
+            </p>
+          </div>
+
+          {/* 4 Stage Pills */}
+          <div className="flex items-center bg-[#050505] p-1 rounded-xl border border-[#303438] gap-1">
+            {[
+              { id: 1, label: '1. Vision' },
+              { id: 2, label: '2. 7 Phases' },
+              { id: 3, label: '3. Ghost Benchmark' },
+              { id: 4, label: '4. Action Drills' }
+            ].map((st) => (
+              <button
+                key={st.id}
+                onClick={() => setActiveStoryStage(st.id)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold transition-all cursor-pointer ${
+                  activeStoryStage === st.id
+                    ? 'bg-[#7FEA35] text-[#050505] shadow-xs'
+                    : 'text-[#A5A9AD] hover:text-white'
+                }`}
+              >
+                {st.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Dynamic Interactive Stage Content */}
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
+          <div className="lg:col-span-7">
+            <Batter3DCanvas
+              shotName="Cover Drive"
+              initialPhase={
+                activeStoryStage === 1
+                  ? 'stance'
+                  : activeStoryStage === 2
+                  ? 'downswing'
+                  : activeStoryStage === 3
+                  ? 'impact'
+                  : 'follow_through'
+              }
+              isGhost={activeStoryStage === 3}
+              ghostColor="#00f0ff"
+              highlightJoint={activeStoryStage === 4 ? 'frontKnee' : null}
+              height={360}
+              showControls={false}
+              showPhaseScrubber={activeStoryStage === 2}
+              showCameraPresets={true}
+              autoOrbitDefault={activeStoryStage === 1}
+            />
+          </div>
+
+          <div className="lg:col-span-5 space-y-4">
+            {activeStoryStage === 1 && (
+              <div className="space-y-3">
+                <div className="inline-block px-2.5 py-0.5 rounded-full bg-[#7FEA35]/15 border border-[#7FEA35]/30 text-[#7FEA35] text-[10px] font-mono font-bold uppercase">
+                  Stage 1 · Sub-millimeter Vision
+                </div>
+                <h3 className="text-lg font-black text-white">It Sees Your Body in 3D Space</h3>
+                <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                  CricketIQ isolates the striker at the crease and maps 33 high-precision forward kinematics landmarks—tracking head station, lead knee flexion, spine angle, and bat plane in real time at 30-60 FPS.
+                </p>
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono text-slate-300">
+                  <div className="p-2.5 rounded-lg bg-[#181B1D] border border-[#303438]">
+                    <div className="text-[#A5A9AD] text-[10px]">Striker Isolation</div>
+                    <div className="text-[#7FEA35] font-bold">100% Batter Cues</div>
+                  </div>
+                  <div className="p-2.5 rounded-lg bg-[#181B1D] border border-[#303438]">
+                    <div className="text-[#A5A9AD] text-[10px]">Bat Tracking</div>
+                    <div className="text-cyan-400 font-bold">Luminous Trajectory</div>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {activeStoryStage === 2 && (
+              <div className="space-y-3">
+                <div className="inline-block px-2.5 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-800 text-cyan-300 text-[10px] font-mono font-bold uppercase">
+                  Stage 2 · Stroke Segmentation
+                </div>
+                <h3 className="text-lg font-black text-white">It Breaks Your Swing into 7 Phases</h3>
+                <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                  Instead of evaluating a swing as a blur, the biLSTM engine isolates the 7 canonical stroke phases: Stance, Backlift, Stride, Downswing, Impact Window, Follow-through, and Recovery.
+                </p>
+                <div className="p-3 rounded-lg bg-[#181B1D] border border-[#303438] text-xs font-mono text-slate-300">
+                  <span className="text-[#7FEA35] font-bold">MCC Standard Window: </span>
+                  Impact window is calculated precisely at maximum bat angular acceleration.
+                </div>
+              </div>
+            )}
+
+            {activeStoryStage === 3 && (
+              <div className="space-y-3">
+                <div className="inline-block px-2.5 py-0.5 rounded-full bg-purple-950/80 border border-purple-800 text-purple-300 text-[10px] font-mono font-bold uppercase">
+                  Stage 3 · Telemetry Alignment
+                </div>
+                <h3 className="text-lg font-black text-white">It Compares You to the Ideal Ghost</h3>
+                <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                  Your kinematic curves are aligned with MCC and Cricket Australia benchmark trajectories using Dynamic Time Warping (DTW), revealing millimeter deviations in your front-foot stride and bat swing plane.
+                </p>
+                <div className="p-3 rounded-lg bg-[#181B1D] border border-[#303438] text-xs font-mono text-cyan-300">
+                  Ghost Overlay: Zero guess-work alignment showing exactly where your bat deviated from the line.
+                </div>
+              </div>
+            )}
+
+            {activeStoryStage === 4 && (
+              <div className="space-y-3">
+                <div className="inline-block px-2.5 py-0.5 rounded-full bg-[#7FEA35]/15 border border-[#7FEA35]/30 text-[#7FEA35] text-[10px] font-mono font-bold uppercase">
+                  Stage 4 · Actionable Coaching
+                </div>
+                <h3 className="text-lg font-black text-white">Plain-English Coaching & Drills</h3>
+                <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                  No confusing math jargon. CricketIQ tells you in plain English what you did wrong (e.g., "Front knee collapsed at impact"), why it hurts the shot ("Causes bat to slice across the ball"), and the exact drill to fix it on the next ball.
+                </p>
+                <div className="p-3 rounded-lg bg-[#181B1D] border border-[#7FEA35]/40 text-xs text-white">
+                  <strong className="text-[#7FEA35] font-mono">Prescribed Drill: </strong>
+                  Drop-ball front knee alignment drill with cone marker.
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       </div>
 

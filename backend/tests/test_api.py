@@ -32,12 +32,11 @@ def test_evaluation_report():
     response = client.get("/api/evaluation/report")
     assert response.status_code == 200
     rep = response.json()
-    assert "accuracy" in rep
-    assert rep["accuracy"] > 0.90
-    assert "macro_f1" in rep
-    assert len(rep["per_class_metrics"]) == 7
-    assert "confusion_matrix" in rep
-    assert len(rep["confusion_matrix"]) == 7
+    assert "has_empirical_data" in rep
+    assert "min_required_per_shot" in rep
+    if rep["has_empirical_data"]:
+        assert "accuracy" in rep
+        assert "macro_f1" in rep
 
 def test_list_sessions():
     response = client.get("/api/sessions")

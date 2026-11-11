@@ -92,6 +92,19 @@ class SessionRepository:
                 except sqlite3.OperationalError:
                     pass
 
+            # Performance indexes on high-frequency query columns
+            for idx_sql in [
+                "CREATE INDEX IF NOT EXISTS idx_sessions_created_at ON sessions(created_at)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_status ON sessions(status)",
+                "CREATE INDEX IF NOT EXISTS idx_sessions_shot_type ON sessions(shot_type)",
+                "CREATE INDEX IF NOT EXISTS idx_ref_shot_name ON reference_videos(shot_name)",
+            ]:
+                try:
+                    conn.execute(idx_sql)
+                    conn.commit()
+                except sqlite3.OperationalError:
+                    pass
+
         # Seed reference_videos if table is empty
         self._seed_reference_videos()
 
@@ -142,18 +155,28 @@ class SessionRepository:
         camera_angle: str = "Side View",
         category: Optional[str] = None,
         striker_track_id: Optional[int] = None,
-        striker_tap_coords: Optional[str] = None
+        striker_tap_coords: Optional[str] = None,
+        created_at: Optional[str] = None
     ) -> Dict[str, Any]:
         if not category or category == "Other":
             category = resolve_shot_category(shot_type)
         with self._get_connection() as conn:
-            conn.execute("""
-                INSERT OR REPLACE INTO sessions (
-                    session_id, video_filename, original_path, shot_type, predicted_shot_type,
-                    prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords,
-                    status, progress, current_step
-                ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing')
-            """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords))
+            if created_at:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sessions (
+                        session_id, video_filename, original_path, shot_type, predicted_shot_type,
+                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords,
+                        status, progress, current_step, created_at
+                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing', ?)
+                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords, created_at))
+            else:
+                conn.execute("""
+                    INSERT OR REPLACE INTO sessions (
+                        session_id, video_filename, original_path, shot_type, predicted_shot_type,
+                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords,
+                        status, progress, current_step
+                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing')
+                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords))
             conn.commit()
         return self.get_session(session_id)
 
@@ -261,6 +284,41 @@ class SessionRepository:
             ))
             conn.commit()
 
+        return self.get_session(session_id)
+
+    def update_striker_track_id(self, session_id: str, track_id: int):
+        """Updates striker_track_id and resets session status to queued for re-processing."""
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE sessions
+                SET striker_track_id = ?,
+                    status = 'queued',
+                    progress = 0.0,
+                    current_step = 'Re-analyzing with selected striker...'
+                WHERE session_id = ?
+            """, (track_id, session_id))
+            conn.commit()
+
+    def update_result(self, session_id: str, result_dict: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Updates result_json and associated columns for a session."""
+        shot_type = result_dict.get("shot_type") or "Unknown"
+        resolved_category = resolve_shot_category(shot_type)
+        with self._get_connection() as conn:
+            conn.execute("""
+                UPDATE sessions
+                SET shot_type = ?,
+                    user_confirmed_shot_type = ?,
+                    category = ?,
+                    result_json = ?
+                WHERE session_id = ?
+            """, (
+                shot_type,
+                result_dict.get("user_confirmed_shot_type"),
+                resolved_category,
+                json.dumps(result_dict),
+                session_id
+            ))
+            conn.commit()
         return self.get_session(session_id)
 
     def get_session(self, session_id: str) -> Optional[Dict[str, Any]]:
