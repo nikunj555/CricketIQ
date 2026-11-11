@@ -403,6 +403,7 @@ class PoseService:
     def __init__(self, model_asset_path: Optional[Path] = None):
         self.model_asset_path = str(model_asset_path or settings.MODEL_ASSET_PATH)
         self.landmarker = None
+        self.init_error = None
         self._init_landmarker()
 
     def _init_landmarker(self):
@@ -410,13 +411,19 @@ class PoseService:
             import mediapipe as mp
             from mediapipe.tasks.python import vision, BaseOptions
 
-            if not Path(self.model_asset_path).exists():
+            p = Path(self.model_asset_path).resolve()
+            if not p.exists():
+                self.init_error = f"PoseLandmarker asset not found at {self.model_asset_path}"
                 logger.warning(f"PoseLandmarker asset not found at {self.model_asset_path}. Pose estimation disabled until asset downloaded.")
                 return
 
+            with open(p, "rb") as f:
+                model_data = f.read()
+
             # Support multi-pose detection (up to 4 persons simultaneously)
+            # Use in-memory buffer to prevent C++ Linux path loading failures
             options = vision.PoseLandmarkerOptions(
-                base_options=BaseOptions(model_asset_path=self.model_asset_path),
+                base_options=BaseOptions(model_asset_buffer=model_data),
                 running_mode=vision.RunningMode.IMAGE,
                 num_poses=4,
                 min_pose_detection_confidence=0.35,
@@ -424,8 +431,10 @@ class PoseService:
                 min_tracking_confidence=0.35
             )
             self.landmarker = vision.PoseLandmarker.create_from_options(options)
+            self.init_error = None
             logger.info("MediaPipe Multi-PoseLandmarker (num_poses=4) initialized successfully.")
         except Exception as e:
+            self.init_error = f"{type(e).__name__}: {str(e)}"
             logger.error(f"Failed to initialize PoseLandmarker: {e}")
             self.landmarker = None
 

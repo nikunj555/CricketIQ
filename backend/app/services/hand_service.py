@@ -40,7 +40,9 @@ class HandService:
             return
 
         try:
-            base_options = python.BaseOptions(model_asset_path=str(self.model_path))
+            with open(self.model_path, "rb") as f:
+                model_data = f.read()
+            base_options = python.BaseOptions(model_asset_buffer=model_data)
             options = vision.HandLandmarkerOptions(
                 base_options=base_options,
                 num_hands=2,

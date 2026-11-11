@@ -73,6 +73,7 @@ def health_check():
                 "loaded": pose_service.landmarker is not None,
                 "asset_path": str(settings.MODEL_ASSET_PATH),
                 "asset_exists": settings.MODEL_ASSET_PATH.exists(),
+                "error": getattr(pose_service, "init_error", None),
             },
             "phase_classifier": {
                 "name": "BiLSTM Temporal Action Phase Classifier",

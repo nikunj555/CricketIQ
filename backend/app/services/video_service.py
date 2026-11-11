@@ -246,7 +246,7 @@ class VideoService:
             actual_total_frames = frame_idx
 
             if actual_total_frames == 0:
-                session_repo.update_progress(session_id, "failed", 0.0, "No frames could be extracted from video.")
+                session_repo.update_progress(session_id, "failed", 0.0, "No frames could be extracted from video.", "No frames could be extracted from video.")
                 return
 
             # Multi-cue striker classification across all detected tracks
@@ -465,7 +465,7 @@ class VideoService:
                     f"(minimum required: 50.0%). Possible causes: camera is too far away, lighting is too dark, "
                     f"or the batter's full body (head to feet) was cut off by the camera frame."
                 )
-                session_repo.update_progress(session_id, "failed", 0.0, reject_reason)
+                session_repo.update_progress(session_id, "failed", 0.0, reject_reason, error=reject_reason)
                 return
 
             # Temporal Smoothing & Derivative Enrichment on 100% of frames

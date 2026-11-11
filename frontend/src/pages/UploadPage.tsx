@@ -114,7 +114,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         } else if (statusData.status === 'failed') {
           clearInterval(pollIntervalRef.current);
           setUploading(false);
-          setError(statusData.error || 'Video analysis failed. Please check video readability.');
+          setError(statusData.error || statusData.current_step || 'Video analysis failed. Please check video readability.');
         }
       } catch (err) {
         clearInterval(pollIntervalRef.current);
