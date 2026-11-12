@@ -1032,16 +1032,25 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
             </div>
           )}
 
+          {analysis.striker_selection_reason && (
+            <p className="text-xs text-[#7FEA35] bg-[#7FEA35]/10 p-2.5 rounded-lg border border-[#7FEA35]/25">
+              {analysis.striker_selection_reason}
+            </p>
+          )}
+
           {/* Biomechanical Cues Snapshot */}
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono pt-1">
             <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Bat Pose Stance: {analysis.striker_isolation_evidence.cues?.cue1_bat_pose_score != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue1_bat_pose_score * 100)}%` : 'Verified'}
+              Bat In Hand: {analysis.striker_isolation_evidence.cues?.cue1_bat_in_hand != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue1_bat_in_hand * 100)}%` : 'Verified'}
             </span>
             <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Crease Anchor: {analysis.striker_isolation_evidence.cues?.cue2_position_score != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue2_position_score * 100)}%` : 'Stable'}
+              Crease Anchor: {analysis.striker_isolation_evidence.cues?.cue2_position_crease != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue2_position_crease * 100)}%` : 'Stable'}
             </span>
             <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Rotational Swing: {analysis.striker_isolation_evidence.cues?.cue3_motion_score != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue3_motion_score * 100)}%` : 'True'}
+              Rotational Swing: {analysis.striker_isolation_evidence.cues?.cue3_motion_signature != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue3_motion_signature * 100)}%` : 'True'}
+            </span>
+            <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
+              Batting Stance: {analysis.striker_isolation_evidence.cues?.cue4_batting_stance != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue4_batting_stance * 100)}%` : 'Active'}
             </span>
           </div>
         </div>

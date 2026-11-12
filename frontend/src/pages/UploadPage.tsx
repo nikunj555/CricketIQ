@@ -236,22 +236,28 @@ export const UploadPage: React.FC<UploadPageProps> = ({
             )}
 
             {strikerInspection && strikerInspection.candidates && strikerInspection.candidates.length > 1 && (
-              <div className="bg-[#111315] border border-amber-600/60 rounded-xl p-4 space-y-3">
+              <div className={`bg-[#111315] border rounded-xl p-4 space-y-3 ${strikerInspection.needs_confirmation ? 'border-red-500/80 shadow-lg shadow-red-950/30' : 'border-amber-600/60'}`}>
                 <div className="flex items-center justify-between">
-                  <div className="flex items-center space-x-2 text-xs font-bold text-amber-300">
-                    <Camera className="w-4 h-4 text-amber-400" />
-                    <span>Multiple Batters Detected ({strikerInspection.candidates.length})</span>
+                  <div className={`flex items-center space-x-2 text-xs font-bold ${strikerInspection.needs_confirmation ? 'text-red-400' : 'text-amber-300'}`}>
+                    <Camera className={`w-4 h-4 ${strikerInspection.needs_confirmation ? 'text-red-400' : 'text-amber-400'}`} />
+                    <span>
+                      {strikerInspection.needs_confirmation
+                        ? 'Could not tell who the striker is. Please select the batter'
+                        : `Multiple People Detected (${strikerInspection.candidates.length})`}
+                    </span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#A5A9AD]">Select who is batting</span>
+                  <span className="text-[10px] font-mono text-[#A5A9AD]">Tap the striker to lock tracking</span>
                 </div>
                 <p className="text-xs text-[#A5A9AD]">
-                  Tap or click a candidate below to ensure pose tracking remains locked exclusively onto that batter.
+                  {strikerInspection.needs_confirmation
+                    ? 'Two or more people scored close together. Tap or click the batter below to lock skeleton and kinematics exclusively onto them.'
+                    : 'Tap or click a candidate box on the frame or select below to ensure pose tracking remains locked exclusively onto that batter.'}
                 </p>
 
-                {strikerInspection.frame0_thumbnail_base64 && (
+                {(strikerInspection.frame_0_data_url || strikerInspection.frame0_thumbnail_base64) && (
                   <div className="relative max-w-sm mx-auto rounded-lg overflow-hidden border border-[#303438]">
                     <img
-                      src={`data:image/jpeg;base64,${strikerInspection.frame0_thumbnail_base64}`}
+                      src={strikerInspection.frame_0_data_url || `data:image/jpeg;base64,${strikerInspection.frame0_thumbnail_base64}`}
                       alt="Candidate batters"
                       className="w-full object-cover"
                     />
@@ -297,7 +303,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                           : 'bg-[#181B1D] text-[#F5F5F5] border-[#303438] hover:border-[#7FEA35]'
                       }`}
                     >
-                      {c.is_suggested_striker ? '★ ' : ''}Person {c.track_id} (Motion: {c.wrist_motion_score})
+                      {c.is_suggested_striker ? '★ ' : ''}Person {c.track_id} (Score: {c.striker_score != null ? Math.round(c.striker_score * 100) + '%' : c.wrist_motion_score})
                     </button>
                   ))}
                 </div>

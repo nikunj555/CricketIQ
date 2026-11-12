@@ -147,6 +147,8 @@ class AnalysisResult(BaseModel):
     camera_view_warning: Optional[str] = None
     shot_mismatch_warning: Optional[str] = None
     striker_track_id: Optional[int] = None
+    striker_score: Optional[float] = None
+    striker_selection_reason: Optional[str] = None
     striker_candidates: Optional[List[Dict[str, Any]]] = None
     striker_isolation_evidence: Optional[Dict[str, Any]] = None
     striker_tracking_status: Optional[str] = None
@@ -186,8 +188,10 @@ class StrikerInspectionResponse(BaseModel):
     total_persons: int
     frame_width: int
     frame_height: int
+    frame0_thumbnail_base64: Optional[str] = None
     frame_0_data_url: Optional[str] = None
     needs_confirmation: bool = False
+    confirmation_message: Optional[str] = None
 
 class VideoUploadResponse(BaseModel):
     session_id: str

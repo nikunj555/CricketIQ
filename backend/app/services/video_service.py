@@ -267,7 +267,7 @@ class VideoService:
                 return
 
             # Multi-cue striker classification across all detected tracks
-            best_tid, track_classifications, needs_confirmation = tracker.classify_tracks(total_frames=actual_total_frames)
+            best_tid, track_classifications, needs_confirmation, confirmation_message = tracker.classify_tracks(total_frames=actual_total_frames)
 
             # Resolve locked active striker (user override > tap coords > multi-cue classification)
             striker_select_method = "automatic_multi_cue"
@@ -311,6 +311,7 @@ class VideoService:
             )
 
             # Isolate striker landmarks exclusively across sampled frames
+            # CRITICAL INVARIANT: NEVER switch to another person (e.g. bowler or non-striker)
             for s_idx in sorted(per_frame_person_tracks.keys()):
                 f_tracks = per_frame_person_tracks[s_idx]
                 lms = None
@@ -318,7 +319,7 @@ class VideoService:
                 if active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
                     lms = f_tracks[active_striker_id]["landmarks"]
                     world_lms = f_tracks[active_striker_id]["world_landmarks"]
-                elif len(f_tracks) == 1:
+                elif active_striker_id is None and len(f_tracks) == 1:
                     single_tr = next(iter(f_tracks.values()))
                     lms = single_tr["landmarks"]
                     world_lms = single_tr.get("world_landmarks")
@@ -728,10 +729,13 @@ class VideoService:
                 summary["overall_technique_score"] = overall_score
                 summary["support_tier"] = "supported"
 
-                coaching_paused = conf_level_code in ["cant_tell", "not_sure"]
+                coaching_paused = conf_level_code in ["cant_tell", "not_sure"] or (needs_confirmation and striker_track_id is None)
                 pause_reason = None
                 if coaching_paused:
-                    pause_reason = "Shot recognition is uncertain. Please confirm which shot you played so we can give you accurate technique coaching."
+                    if needs_confirmation and striker_track_id is None:
+                        pause_reason = confirmation_message or "Could not tell who the striker is. Please select the batter"
+                    else:
+                        pause_reason = "Shot recognition is uncertain. Please confirm which shot you played so we can give you accurate technique coaching."
 
                 # Generate structured metric comparison table (all phases and metrics vs ideal)
                 comparison_table = feedback_service.generate_comparison_table(
@@ -770,6 +774,7 @@ class VideoService:
                     "role": meta.get("role", "other"),
                     "confidence": meta.get("confidence", 0.5),
                     "striker_score": meta.get("striker_score", 0.0),
+                    "reason": meta.get("reason", ""),
                     "is_default": (tid == best_tid),
                 })
 
@@ -787,19 +792,25 @@ class VideoService:
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
+                "striker_score": striker_meta.get("striker_score", 0.85),
+                "striker_selection_reason": striker_meta.get("reason", f"Selected as striker (Track #{active_striker_id})"),
                 "striker_candidates": striker_candidates,
                 "striker_isolation_evidence": {
                     "active_striker_id": active_striker_id,
                     "role": striker_meta.get("role", "striker"),
                     "confidence": striker_confidence,
+                    "striker_score": striker_meta.get("striker_score", 0.85),
+                    "reason": striker_meta.get("reason", f"Selected as striker (Track #{active_striker_id})"),
                     "selection_method": striker_select_method,
                     "needs_confirmation": needs_confirmation,
+                    "confirmation_message": confirmation_message,
                     "cues": striker_evidence,
                     "all_tracks": {
                         t: {
                             "role": meta.get("role"),
                             "confidence": meta.get("confidence"),
-                            "striker_score": meta.get("striker_score")
+                            "striker_score": meta.get("striker_score"),
+                            "reason": meta.get("reason", "")
                         }
                         for t, meta in track_classifications.items()
                     }

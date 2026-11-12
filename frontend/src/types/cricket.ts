@@ -215,6 +215,8 @@ export interface AnalysisResult {
   detected_camera_view?: string | null;
   camera_view_warning?: string | null;
   striker_track_id?: number | null;
+  striker_score?: number | null;
+  striker_selection_reason?: string | null;
   striker_candidates?: Array<{
     track_id: number;
     bbox: number[];
@@ -222,6 +224,7 @@ export interface AnalysisResult {
     role: string;
     confidence: number;
     striker_score: number;
+    reason?: string;
     is_default: boolean;
   }>;
   user_selected_shot?: string | null;

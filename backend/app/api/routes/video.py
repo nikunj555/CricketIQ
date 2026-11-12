@@ -35,6 +35,7 @@ async def inspect_strikers_endpoint(
         cap = cv2.VideoCapture(str(temp_path))
         ret, frame0 = cap.read()
         cap.release()
+        frame0_raw_b64 = None
         frame0_b64 = None
         if ret and frame0 is not None:
             # Resize slightly if very high-res to keep response snappy
@@ -44,7 +45,9 @@ async def inspect_strikers_endpoint(
                 frame0 = cv2.resize(frame0, (1280, int(h * scale)))
             success, enc = cv2.imencode(".jpg", frame0, [cv2.IMWRITE_JPEG_QUALITY, 80])
             if success:
-                frame0_b64 = f"data:image/jpeg;base64,{base64.b64encode(enc).decode('utf-8')}"
+                raw_str = base64.b64encode(enc).decode('utf-8')
+                frame0_raw_b64 = raw_str
+                frame0_b64 = f"data:image/jpeg;base64,{raw_str}"
 
         candidates = [
             StrikerCandidate(
@@ -59,14 +62,19 @@ async def inspect_strikers_endpoint(
             for c in inspect_data.get("candidates", [])
         ]
 
+        needs_conf = inspect_data.get("needs_confirmation", False)
+        conf_msg = "Could not tell who the striker is. Please select the batter" if needs_conf else None
+
         return StrikerInspectionResponse(
             candidates=candidates,
             default_track_id=inspect_data.get("default_track_id", 0),
             total_persons=inspect_data.get("total_persons", len(candidates)),
             frame_width=inspect_data.get("frame_width", 640),
             frame_height=inspect_data.get("frame_height", 480),
+            frame0_thumbnail_base64=frame0_raw_b64,
             frame_0_data_url=frame0_b64,
-            needs_confirmation=inspect_data.get("needs_confirmation", False)
+            needs_confirmation=needs_conf,
+            confirmation_message=conf_msg
         )
     finally:
         temp_path.unlink(missing_ok=True)

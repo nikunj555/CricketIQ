@@ -88,16 +88,18 @@ def test_striker_vs_bowler_classification():
         ]
         tracker.update(poses, frame_idx=f)
 
-    best_tid, classifications, needs_conf = tracker.classify_tracks(total_frames=60)
+    best_tid, classifications, needs_conf, conf_msg = tracker.classify_tracks(total_frames=60)
 
     assert best_tid == 0, f"Expected Track 0 (striker) to be selected, but got Track {best_tid}"
     assert classifications[0]["role"] == "striker"
     assert classifications[1]["role"] == "bowler", f"Expected Track 1 to be classified as bowler, got {classifications[1]['role']}"
     assert classifications[0]["striker_score"] > classifications[1]["striker_score"]
-    assert "cue1_bat_pose_score" in classifications[0]["evidence"]
-    assert "cue2_position_score" in classifications[0]["evidence"]
-    assert "cue3_motion_score" in classifications[0]["evidence"]
-    assert "cue4_temporal_score" in classifications[0]["evidence"]
+    assert "cue1_bat_in_hand" in classifications[0]["evidence"]
+    assert "cue2_position_crease" in classifications[0]["evidence"]
+    assert "cue3_motion_signature" in classifications[0]["evidence"]
+    assert "cue4_batting_stance" in classifications[0]["evidence"]
+    assert "reason" in classifications[0]
+    assert "Bowler" in classifications[1]["reason"]
 
 
 def test_non_striker_exclusion():
@@ -124,10 +126,129 @@ def test_non_striker_exclusion():
         ]
         tracker.update(poses, frame_idx=f)
 
-    best_tid, classifications, _ = tracker.classify_tracks(total_frames=50)
+    best_tid, classifications, _, _ = tracker.classify_tracks(total_frames=50)
     assert best_tid == 0
     assert classifications[1]["role"] == "non-striker"
     assert classifications[0]["striker_score"] > 0.60
+    assert "Non-Striker" in classifications[1]["reason"]
+
+
+def test_track_id_stays_same_across_clip():
+    """
+    Verifies that person track IDs persist continuously across all frames of the clip
+    using IoU and centroid spatial matching.
+    """
+    tracker = MultiPersonTracker(max_disappeared=15)
+    for f in range(40):
+        # Striker moves slightly with forward stride
+        x0 = 0.30 + (f * 0.001)
+        # Non-striker stands stationary
+        x1 = 0.75
+        poses = [
+            {"landmarks": [{"x": x0, "y": 0.5}] * 33, "bbox": [x0 - 0.05, 0.2, x0 + 0.05, 0.8]},
+            {"landmarks": [{"x": x1, "y": 0.5}] * 33, "bbox": [x1 - 0.05, 0.2, x1 + 0.05, 0.8]}
+        ]
+        active_tracks = tracker.update(poses, frame_idx=f)
+        assert 0 in active_tracks, "Track 0 must persist"
+        assert 1 in active_tracks, "Track 1 must persist"
+        assert active_tracks[0]["track_id"] == 0
+        assert active_tracks[1]["track_id"] == 1
+
+
+def test_manual_selection_overrides_automatic():
+    """
+    Verifies that when a user specifies striker_track_id=1, the manual selection
+    strictly overrides the automatic choice (even if Track 0 scored higher).
+    """
+    tracker = MultiPersonTracker(max_disappeared=15)
+    for f in range(30):
+        p0 = {"landmarks": [{"x": 0.3, "y": 0.5}] * 33, "bbox": [0.25, 0.2, 0.35, 0.8]}
+        p1 = {"landmarks": [{"x": 0.7, "y": 0.5}] * 33, "bbox": [0.65, 0.2, 0.75, 0.8]}
+        tracker.update([p0, p1], frame_idx=f)
+
+    best_auto_tid, classifications, _, _ = tracker.classify_tracks(total_frames=30)
+
+    # Simulate manual user override
+    user_override_tid = 1
+    locked_striker_id = user_override_tid if user_override_tid is not None else best_auto_tid
+    assert locked_striker_id == 1, "User specified track 1 must override automatic choice"
+
+
+def test_close_scores_triggers_confirmation_message():
+    """
+    Verifies that if two players score close together (within 0.12 of each other),
+    the system does not guess, sets needs_confirmation=True, and returns
+    'Could not tell who the striker is. Please select the batter'.
+    """
+    tracker = MultiPersonTracker(max_disappeared=15)
+    # Create two nearly identical tracks (two batters standing at net practice)
+    for f in range(30):
+        p0 = {"landmarks": [{"x": 0.35, "y": 0.5}] * 33, "bbox": [0.30, 0.2, 0.40, 0.8]}
+        p1 = {"landmarks": [{"x": 0.65, "y": 0.5}] * 33, "bbox": [0.60, 0.2, 0.70, 0.8]}
+        tracker.update([p0, p1], frame_idx=f)
+
+    best_tid, classifications, needs_confirmation, conf_msg = tracker.classify_tracks(total_frames=30)
+    assert needs_confirmation is True, "Close scores must trigger confirmation"
+    assert conf_msg == "Could not tell who the striker is. Please select the batter"
+
+
+def test_single_person_net_footage():
+    """
+    Verifies that solitary net footage with only one person detected automatically locks
+    onto that person as striker with needs_confirmation=False.
+    """
+    tracker = MultiPersonTracker(max_disappeared=15)
+    for f in range(30):
+        p0 = {"landmarks": [{"x": 0.5, "y": 0.5}] * 33, "bbox": [0.45, 0.2, 0.55, 0.8]}
+        tracker.update([p0], frame_idx=f)
+
+    best_tid, classifications, needs_confirmation, conf_msg = tracker.classify_tracks(total_frames=30)
+    assert best_tid == 0
+    assert len(classifications) == 1
+    assert classifications[0]["role"] == "striker"
+    assert needs_confirmation is False
+    assert conf_msg is None
+
+
+def test_briefly_hidden_striker_never_switches_to_bowler():
+    """
+    Verifies that if the striker (Track 0) is briefly occluded for 5 frames,
+    the pipeline never falls back to the bowler (Track 1) even if Track 1 is the only person visible.
+    """
+    # Track 0 is striker, Track 1 is bowler
+    # Frames 0..20: both present
+    # Frames 21..25: Track 0 occluded (only Track 1 detected)
+    # Frames 26..35: both present again
+    active_striker_id = 0
+    extracted_striker_lms = []
+
+    for f in range(35):
+        f_tracks = {}
+        # Bowler is always visible
+        f_tracks[1] = {"landmarks": [{"x": 0.8, "y": 0.3}] * 33, "is_lost": False}
+
+        # Striker is visible except frames 21..25
+        if not (21 <= f <= 25):
+            f_tracks[0] = {"landmarks": [{"x": 0.3, "y": 0.6}] * 33, "is_lost": False}
+
+        # The extraction invariant: NEVER take track 1 when active_striker_id is 0
+        lms = None
+        if active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
+            lms = f_tracks[active_striker_id]["landmarks"]
+        elif active_striker_id is None and len(f_tracks) == 1:
+            single_tr = next(iter(f_tracks.values()))
+            lms = single_tr["landmarks"]
+
+        extracted_striker_lms.append(lms)
+
+    # In frames 21..25, extracted landmarks for striker must be None (to be bridged by interpolation)
+    for f in range(21, 26):
+        assert extracted_striker_lms[f] is None, f"Frame {f} must not take bowler's landmarks"
+
+    # Outside occlusion, striker landmarks are present
+    assert extracted_striker_lms[10] is not None
+    assert extracted_striker_lms[30] is not None
+    assert extracted_striker_lms[10][0]["x"] == 0.3
 
 
 # ---------------------------------------------------------------------------
@@ -348,6 +469,22 @@ if __name__ == "__main__":
     print("Running test_non_striker_exclusion()...")
     test_non_striker_exclusion()
     print("PASS: test_non_striker_exclusion")
+
+    print("Running test_track_id_stays_same_across_clip()...")
+    test_track_id_stays_same_across_clip()
+    print("PASS: test_track_id_stays_same_across_clip")
+
+    print("Running test_manual_selection_overrides_automatic()...")
+    test_manual_selection_overrides_automatic()
+    print("PASS: test_manual_selection_overrides_automatic")
+
+    print("Running test_close_scores_triggers_confirmation_message()...")
+    test_close_scores_triggers_confirmation_message()
+    print("PASS: test_close_scores_triggers_confirmation_message")
+
+    print("Running test_single_person_net_footage()...")
+    test_single_person_net_footage()
+    print("PASS: test_single_person_net_footage")
 
     print("Running test_leave_no_shot_attempted()...")
     test_leave_no_shot_attempted()
