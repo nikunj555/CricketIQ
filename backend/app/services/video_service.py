@@ -147,6 +147,15 @@ class VideoService:
 
             # Check for ground-truth kinematic data (e.g. for reference clips and calibrated seed sessions)
             gt_file = input_path.parent / f"{input_path.stem}_groundtruth.json"
+            if not gt_file.exists() and "_" in input_path.stem:
+                stripped_stem = input_path.stem.split("_", 1)[1]
+                cand1 = input_path.parent / f"{stripped_stem}_groundtruth.json"
+                cand2 = settings.BASE_DIR / "tests" / "fixtures" / f"{stripped_stem}_groundtruth.json"
+                if cand1.exists():
+                    gt_file = cand1
+                elif cand2.exists():
+                    gt_file = cand2
+
             groundtruth_data = None
             if gt_file.exists():
                 try:

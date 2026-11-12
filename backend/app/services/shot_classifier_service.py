@@ -231,8 +231,9 @@ class ShotClassifierService:
             is_side_on = not any(v in camera_view.lower() for v in ["front", "behind", "pitch", "bowler"])
 
             is_pull_or_hook = (
-                (is_side_on and (dx >= 0.45 or dx <= -0.25 or (abs(dx) >= 0.25 and dy <= 0.10))) or
-                (not is_side_on and dx < -0.15)
+                w_span_x >= 0.65 or
+                (is_side_on and (dx >= 0.10 or dx <= -0.15 or abs(dx) >= 0.10)) or
+                (not is_side_on and dx < -0.10)
             )
 
             if is_punch:
