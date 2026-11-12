@@ -100,9 +100,11 @@ export const UploadPage: React.FC<UploadPageProps> = ({
   };
 
   const pollStatus = (sessionId: string) => {
+    let consecutiveErrors = 0;
     pollIntervalRef.current = setInterval(async () => {
       try {
         const statusData = await api.getProcessingStatus(sessionId);
+        consecutiveErrors = 0; // Reset error streak on successful ping
         setProgress(statusData.progress);
         setProcessingStatus(statusData.current_step);
 
@@ -117,11 +119,15 @@ export const UploadPage: React.FC<UploadPageProps> = ({
           setError(statusData.error || statusData.current_step || 'Video analysis failed. Please check video readability.');
         }
       } catch (err) {
-        clearInterval(pollIntervalRef.current);
-        setUploading(false);
-        setError('Error polling processing status.');
+        consecutiveErrors += 1;
+        // Don't kill the upload on a transient network delay during heavy 80% video transcoding
+        if (consecutiveErrors >= 8) {
+          clearInterval(pollIntervalRef.current);
+          setUploading(false);
+          setError('Lost connection while polling processing status. Please check your network and try again.');
+        }
       }
-    }, 1000);
+    }, 1500);
   };
 
   const handleUpload = async (e: React.FormEvent) => {

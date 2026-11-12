@@ -602,6 +602,13 @@ class VideoService:
 
                 writer.write(annotated_frame)
 
+                if f_idx % 25 == 0 and actual_total_frames > 0:
+                    render_pct = 80.0 + (f_idx / float(actual_total_frames)) * 8.0
+                    session_repo.update_progress(
+                        session_id, "processing", round(render_pct, 1),
+                        f"Rendering annotated video frame {f_idx + 1}/{actual_total_frames}..."
+                    )
+
                 if is_impact or (not thumb_saved and f_idx == actual_total_frames // 2):
                     cv2.imwrite(str(thumbnail_path), annotated_frame)
                     thumb_saved = True
@@ -622,6 +629,7 @@ class VideoService:
                 cap_t.release()
 
             # Ensure web browser compatibility by transcoding annotated video to standard H.264
+            session_repo.update_progress(session_id, "processing", 88.0, "Optimizing video playback for browser...")
             self._ensure_browser_compatible_video(annotated_path)
 
             # Calculate Overall Summary Metrics
@@ -897,10 +905,11 @@ class VideoService:
                 exe, "-y",
                 "-i", str(video_path),
                 "-c:v", "libx264",
-                "-preset", "fast",
-                "-crf", "22",
+                "-preset", "ultrafast",
+                "-crf", "24",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
+                "-threads", "1",
                 str(temp_out)
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
