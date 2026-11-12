@@ -26,7 +26,11 @@ WELL_SAMPLED_CLASSES = {
     "on drive",
     "forward defensive",
     "pull shot",
-    "sweep"
+    "hook shot",
+    "sweep",
+    "slog sweep",
+    "paddle sweep",
+    "reverse sweep"
 }
 
 # Empirical Platt scaling parameters fitted on 5-fold cross-validation

@@ -105,3 +105,52 @@ def test_top_3_candidates_structure():
         assert "shot_name" in cand
         assert "confidence_pct" in cand
         assert 0 <= cand["confidence_pct"] <= 100
+
+
+def test_drive_never_scores_above_03_for_any_sweep():
+    """A synthetic or recorded drive must NEVER score above 0.3 for any sweep family member."""
+    vs = VideoService()
+    for sid, fname, shot_type in [
+        ("test_sep_cover_drive", "user_cover_drive.mp4", "Cover Drive"),
+        ("test_sep_straight_drive", "user_straight_drive.mp4", "Straight Drive")
+    ]:
+        p = Path(f"backend/tests/fixtures/{fname}")
+        if not session_repo.get_session(sid):
+            session_repo.create_session(sid, video_filename=fname, original_path=str(p), shot_type=shot_type)
+            vs.process_video_session(sid)
+        sess = session_repo.get_session(sid)
+        fms = sess["result"]["time_series"]
+        res = shot_classifier_service.classify_sequence(fms, camera_view="side-on", handedness="Right")
+
+        assert "Sweep" not in res["family"], f"Drive was classified into {res['family']} family!"
+        assert "Sweep" not in res["predicted_shot"], f"Drive was predicted as {res['predicted_shot']}!"
+
+        sweep_shots = {"Sweep", "Slog Sweep", "Paddle Sweep", "Reverse Sweep"}
+        for cand in res["top_candidates"]:
+            if cand["shot_name"] in sweep_shots:
+                assert cand["score"] <= 0.30, f"{cand['shot_name']} scored {cand['score']} > 0.30 on {fname}!"
+                assert cand["confidence_pct"] <= 30, f"{cand['shot_name']} confidence {cand['confidence_pct']}% > 30% on {fname}!"
+
+
+def test_sweep_still_recognized_when_hip_and_bat_path_are_low():
+    """When a real or synthesized sweep has a low hip and horizontal bat path, Sweep family is confirmed."""
+    from scripts.train_and_eval_shot_classifier import synthesize_reference_sequence
+    sweep_frames = synthesize_reference_sequence("Sweep", num_frames=45)
+    res = shot_classifier_service.classify_sequence(sweep_frames, camera_view="side-on", handedness="Right")
+
+    assert res["family"] == "Sweep", f"Expected Sweep family, got {res['family']}"
+    assert "Sweep" in res["predicted_shot"], f"Expected Sweep shot, got {res['predicted_shot']}"
+    assert res["confidence_pct"] >= 65
+
+
+def test_hook_vs_pull_separation_by_impact_height():
+    """Contact at or above shoulder height separates Hook Shot from waist/chest Pull Shot."""
+    from scripts.train_and_eval_shot_classifier import synthesize_reference_sequence
+    hook_frames = synthesize_reference_sequence("Hook Shot", num_frames=45)
+    res_hook = shot_classifier_service.classify_sequence(hook_frames, camera_view="side-on", handedness="Right")
+    assert res_hook["predicted_shot"] == "Hook Shot", f"Expected Hook Shot, got {res_hook['predicted_shot']}"
+
+    pull_frames = synthesize_reference_sequence("Pull Shot", num_frames=45)
+    res_pull = shot_classifier_service.classify_sequence(pull_frames, camera_view="side-on", handedness="Right")
+    assert res_pull["predicted_shot"] == "Pull Shot", f"Expected Pull Shot, got {res_pull['predicted_shot']}"
+
