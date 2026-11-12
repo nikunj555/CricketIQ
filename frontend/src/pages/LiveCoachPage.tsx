@@ -30,6 +30,7 @@ import { api } from '../services/api';
 import { LivePoseState, LiveAttemptFeedback, CricketShot, AnalysisResult, NavTab } from '../types/cricket';
 import { RealisticBatterVisualizer } from '../components/RealisticBatterVisualizer';
 import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
+import { getShotTechnique } from '../data/shotTechnique';
 
 interface LiveCoachPageProps {
   onSelectTab: (tab: NavTab) => void;
@@ -1327,6 +1328,16 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
                   </button>
                 </div>
               </div>
+              {/* Technique Coaching Intent */}
+              {(() => {
+                const tech = getShotTechnique(targetShot);
+                return tech?.intent ? (
+                  <div className="px-3 py-1.5 bg-[#181B1D] border-b border-[#303438] text-[11px] text-[#7FEA35] flex items-center gap-1.5">
+                    <span className="font-bold uppercase tracking-wider text-[9px] bg-[#7FEA35]/15 px-1.5 py-0.5 rounded text-[#7FEA35]">Intent</span>
+                    <span className="text-[#F5F5F5] truncate">{tech.intent}</span>
+                  </div>
+                ) : null;
+              })()}
               {coachAvatarMode === '3d' ? (
                 <Batter3DCanvas
                   shotName={targetShot}

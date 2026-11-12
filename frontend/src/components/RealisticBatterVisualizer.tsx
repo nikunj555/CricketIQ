@@ -13,6 +13,12 @@ import {
 } from 'lucide-react';
 import referenceShotsRaw from '../data/reference_shots.json';
 import { ShotVariant, varyReferenceShot } from '../data/shotVariants';
+import {
+  getShotTechnique,
+  generatePhasesFromTechnique,
+  ShotTechniqueEntry,
+  GeneratedKeyframePose
+} from '../data/shotTechnique';
 
 export type CameraViewAngle = 'side' | 'front' | 'perspective';
 
@@ -64,39 +70,75 @@ const REFERENCE_SHOTS: Record<string, ReferenceShotDefinition> = referenceShotsR
   ReferenceShotDefinition
 >;
 
-export function findReferenceShot(nameOrId?: string | null): { name: string; data: ReferenceShotDefinition } | null {
+export function findReferenceShot(nameOrId?: string | null): { name: string; data: ReferenceShotDefinition; technique?: ShotTechniqueEntry } | null {
   if (!nameOrId) return null;
   const raw = nameOrId.trim();
   const lower = raw.toLowerCase().replace(/[-_]/g, ' ');
 
+  const technique = getShotTechnique(raw);
+
   // Exact match
   if (REFERENCE_SHOTS[raw]) {
-    return { name: raw, data: REFERENCE_SHOTS[raw] };
+    const data = { ...REFERENCE_SHOTS[raw] };
+    if (technique) {
+      data.phases = generatePhasesFromTechnique(technique) as any;
+    }
+    return { name: raw, data, technique: technique || undefined };
   }
 
   // Exact case-insensitive match or slug match
-  for (const [shotName, data] of Object.entries(REFERENCE_SHOTS)) {
+  for (const [shotName, origData] of Object.entries(REFERENCE_SHOTS)) {
     if (
       shotName.toLowerCase() === lower ||
-      data.slug === raw.toLowerCase().replace(/[\s_]/g, '-') ||
-      data.slug.replace(/-/g, ' ') === lower
+      origData.slug === raw.toLowerCase().replace(/[\s_]/g, '-') ||
+      origData.slug.replace(/-/g, ' ') === lower
     ) {
-      return { name: shotName, data };
+      const matchedTech = technique || getShotTechnique(shotName);
+      const data = { ...origData };
+      if (matchedTech) {
+        data.phases = generatePhasesFromTechnique(matchedTech) as any;
+      }
+      return { name: shotName, data, technique: matchedTech || undefined };
     }
   }
 
   // Substring match
-  for (const [shotName, data] of Object.entries(REFERENCE_SHOTS)) {
+  for (const [shotName, origData] of Object.entries(REFERENCE_SHOTS)) {
     const sLower = shotName.toLowerCase();
     if (sLower.includes(lower) || lower.includes(sLower)) {
-      return { name: shotName, data };
+      const matchedTech = technique || getShotTechnique(shotName);
+      const data = { ...origData };
+      if (matchedTech) {
+        data.phases = generatePhasesFromTechnique(matchedTech) as any;
+      }
+      return { name: shotName, data, technique: matchedTech || undefined };
     }
+  }
+
+  // If technique is recognized by shotTechnique directly even if not in reference_shots.json
+  if (technique) {
+    const synthData: ReferenceShotDefinition = {
+      slug: technique.slug,
+      category: technique.category,
+      analysis_status: 'available',
+      source_type: 'authored technique',
+      status_message: 'Biomechanical kinematics active.',
+      ideal_bat_path: technique.intent,
+      coaching_cues: [technique.intent],
+      phases: generatePhasesFromTechnique(technique) as any
+    };
+    return { name: technique.name, data: synthData, technique };
   }
 
   // Graceful fallback for non-standard, uncertain or empty queries
   if (lower.includes('uncertain') || lower.includes('unknown') || lower.includes('no clear shot') || lower.includes('leave')) {
     if (REFERENCE_SHOTS['Cover Drive']) {
-      return { name: 'Cover Drive', data: REFERENCE_SHOTS['Cover Drive'] };
+      const cdTech = getShotTechnique('Cover Drive');
+      const data = { ...REFERENCE_SHOTS['Cover Drive'] };
+      if (cdTech) {
+        data.phases = generatePhasesFromTechnique(cdTech) as any;
+      }
+      return { name: 'Cover Drive', data, technique: cdTech || undefined };
     }
   }
 
@@ -119,8 +161,37 @@ export interface RealisticBatterVisualizerProps {
   debug?: boolean;
 }
 
+// 2-Bone Inverse Kinematics (IK) Solver
+// Finds the unique hinge joint position given root, target, and segment lengths.
+export function solveTwoBoneIK(
+  root: Point2D,
+  target: Point2D,
+  l1: number,
+  l2: number,
+  bendDir: 1 | -1 = 1
+): Point2D {
+  const dx = target.x - root.x;
+  const dy = target.y - root.y;
+  const dist = Math.hypot(dx, dy);
+
+  // Clamp distance to avoid hyperbolic/triangle inequality errors
+  const clampedDist = Math.max(Math.abs(l1 - l2) + 1e-4, Math.min(dist, (l1 + l2) * 0.999));
+  const baseAngle = Math.atan2(dy, dx);
+
+  // Law of Cosines: a^2 + b^2 - 2ab cos(C) => cos(alpha) = (l1^2 + dist^2 - l2^2) / (2 * l1 * dist)
+  const cosAlpha = (l1 * l1 + clampedDist * clampedDist - l2 * l2) / (2 * l1 * clampedDist);
+  const alpha = Math.acos(Math.max(-1, Math.min(1, cosAlpha)));
+
+  const elbowAngle = baseAngle + bendDir * alpha;
+
+  return {
+    x: root.x + l1 * Math.cos(elbowAngle),
+    y: root.y + l1 * Math.sin(elbowAngle),
+    depth: (root.depth + target.depth) / 2
+  };
+}
+
 export const PHASES = [
-  { name: 'Stance', key: 'stance', label: '1. Stance', window: '0% - 15%' },
   { name: 'Backlift', key: 'backlift', label: '2. Backlift', window: '15% - 35%' },
   { name: 'Stride', key: 'stride', label: '3. Stride', window: '35% - 50%' },
   { name: 'Downswing', key: 'downswing', label: '4. Downswing', window: '50% - 65%' },
@@ -342,9 +413,9 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     const xProj = x * cosA - z * sinA;
     const zDepth = x * sinA + z * cosA;
 
-    // Viewport scaling
-    const groundY = h * 0.82;
-    const scale = h * 0.42;
+    // Viewport scaling: keep batter and bat fully inside frame without clipping ground
+    const groundY = h * 0.86;
+    const scale = h * 0.38;
     const originX = w * (view === 'front' ? 0.50 : 0.46);
 
     const screenX = originX + xProj * scale;
@@ -400,7 +471,8 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
 
     const w = canvasRef.current?.clientWidth || 800;
     const h = canvasRef.current?.clientHeight || 500;
-    const scale = h * 0.42;
+    const scale = h * 0.38;
+    const groundY = h * 0.86;
 
     // 1. Pelvis and Hips in 3D
     const hipCenter3D: [number, number, number] = [hip_x, hip_y, 0];
@@ -569,11 +641,23 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     };
 
     // Blade toe sits at 100% of bat length
-    const toe: Point2D = {
+    let toe: Point2D = {
       x: buttEnd.x + ux * batLength,
       y: buttEnd.y + uy * batLength,
       depth: tipP.depth
     };
+
+    // Ground line constraint: bat toe must never penetrate below pitch surface
+    const maxGroundY = groundY - 2;
+    if (toe.y > maxGroundY) {
+      const penetration = toe.y - maxGroundY;
+      buttEnd.y -= penetration;
+      topHandGrip.y -= penetration;
+      bottomHandGrip.y -= penetration;
+      handleEnd.y -= penetration;
+      bladeShoulders.y -= penetration;
+      toe.y = maxGroundY;
+    }
 
     // Map wrists to grip points
     let leadWristP: Point2D;
@@ -586,24 +670,24 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
       rearWristP = topHandGrip;
     }
 
-    // Derive elbows from shoulders and wrists using flex angles
-    const computeElbow = (sh: Point2D, wr: Point2D, flexDeg: number, isLeadArm: boolean): Point2D => {
-      const midX = (sh.x + wr.x) / 2;
-      const midY = (sh.y + wr.y) / 2;
-      const armLen = Math.hypot(wr.x - sh.x, wr.y - sh.y);
-      const perpX = -(wr.y - sh.y) / Math.max(1, armLen);
-      const perpY = (wr.x - sh.x) / Math.max(1, armLen);
-      const flexOffset = Math.sin((flexDeg * Math.PI) / 360) * (scale * 0.18);
-      const sign = isLeadArm ? 1 : -1;
-      return {
-        x: midX + perpX * flexOffset * sign,
-        y: midY + perpY * flexOffset * sign,
-        depth: (sh.depth + wr.depth) / 2
-      };
-    };
+    // Solve arm joints with 2-Bone Inverse Kinematics
+    const armUpperLen = scale * 0.28;
+    const armForeLen = scale * 0.26;
+    const leadElbowP = solveTwoBoneIK(leadShoulderP, leadWristP, armUpperLen, armForeLen, 1);
+    const rearElbowP = solveTwoBoneIK(rearShoulderP, rearWristP, armUpperLen, armForeLen, -1);
 
-    const leadElbowP = computeElbow(leadShoulderP, leadWristP, lead_elbow_flex, true);
-    const rearElbowP = computeElbow(rearShoulderP, rearWristP, rear_elbow_flex, false);
+    // Solve leg joints with 2-Bone Inverse Kinematics
+    const legThighLen = scale * 0.40;
+    const legShinLen = scale * 0.38;
+    const leadHipP = p(leadHip3D);
+    const leadAnkleP = p(leadAnkle3D);
+    const rearHipP = p(rearHip3D);
+    const rearAnkleP = p(rearAnkle3D);
+
+    const leadKneeIK = solveTwoBoneIK(leadHipP, leadAnkleP, legThighLen, legShinLen, 1);
+    const rearKneeIK = isRearKneeling
+      ? p(rearKnee3D)
+      : solveTwoBoneIK(rearHipP, rearAnkleP, legThighLen, legShinLen, 1);
 
     return {
       activeKeyframe: kf1,
@@ -623,15 +707,15 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
         rearElbow: rearElbowP,
         rearWrist: rearWristP,
 
-        leadHip: p(leadHip3D),
-        leadKnee: p(leadKnee3D),
-        leadAnkle: p(leadAnkle3D),
+        leadHip: leadHipP,
+        leadKnee: leadKneeIK,
+        leadAnkle: leadAnkleP,
         leadFoot: p(leadFoot3D),
         leadKneeling: false,
 
-        rearHip: p(rearHip3D),
-        rearKnee: p(rearKnee3D),
-        rearAnkle: p(rearAnkle3D),
+        rearHip: rearHipP,
+        rearKnee: rearKneeIK,
+        rearAnkle: rearAnkleP,
         rearFoot: p(rearFoot3D),
         rearKneeling: isRearKneeling,
 
@@ -706,7 +790,7 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
     ctx.scale(dpr, dpr);
     ctx.clearRect(0, 0, w, h);
 
-    const groundY = h * 0.82;
+    const groundY = h * 0.86;
 
     // 1. Draw Pitch Crease Markings
     drawCricketPitch(ctx, w, h, groundY);
@@ -1489,13 +1573,14 @@ export const RealisticBatterVisualizer: React.FC<RealisticBatterVisualizerProps>
           <span className="text-[10px] text-[#A5A9AD]">({PHASES[activePhaseIndex].window})</span>
         </div>
 
-        {/* Bottom Technical Cue Pill (Reads directly from keyframe_pose.cue) */}
-        <div className="absolute bottom-3 left-3 right-3 bg-[#111315]/90 backdrop-blur-md px-4 py-2 rounded-xl border border-[#303438] text-xs text-[#F5F5F5] flex items-center justify-between pointer-events-none">
+        {/* Bottom Technical Cue Pill & Coaching Intent */}
+        <div className="absolute bottom-3 left-3 right-3 bg-[#111315]/90 backdrop-blur-md px-4 py-2 rounded-xl border border-[#303438] text-xs text-[#F5F5F5] flex flex-col sm:flex-row sm:items-center justify-between gap-1.5 pointer-events-none">
           <div className="flex items-center space-x-2 truncate">
             <Compass className="w-4 h-4 text-[#7FEA35] shrink-0" />
             <span className="truncate">
-              <strong>Key Mechanical Cue: </strong>
-              <span className="text-[#A5A9AD]">{activeKeyframe?.cue || 'Maintain athletic balance and eyes level'}</span>
+              <strong className="text-[#7FEA35]">Intent: </strong>
+              <span className="text-[#F5F5F5] font-medium">{refShotInfo.technique?.intent || refShotInfo.data.ideal_bat_path || 'Balanced cricket stroke'}</span>
+              <span className="text-[#A5A9AD] hidden md:inline ml-2">• Cue: {activeKeyframe?.cue || 'Maintain athletic balance'}</span>
             </span>
           </div>
           <span className="text-[10px] font-mono text-[#7FEA35] shrink-0">

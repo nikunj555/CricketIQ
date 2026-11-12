@@ -22,6 +22,7 @@ import {
 import { ComparisonResult, ReferenceShotMeta, SessionListItem, NavTab } from '../types/cricket';
 import { api } from '../services/api';
 import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
+import { getShotTechnique } from '../data/shotTechnique';
 
 interface ComparisonPageProps {
   sessionId: string | null;
@@ -328,6 +329,16 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({ sessionId, onSel
                 Full Kinematics Forward Model
               </span>
             </div>
+            {/* Technique Coaching Intent */}
+            {(() => {
+              const tech = getShotTechnique(comparison.shot_type);
+              return tech?.intent ? (
+                <div className="px-3 py-2 rounded-xl bg-[#111315] border border-[#303438] text-xs text-[#7FEA35] flex items-center gap-2">
+                  <span className="font-bold uppercase tracking-wider text-[10px] bg-[#7FEA35]/15 px-2 py-0.5 rounded text-[#7FEA35]">Intent</span>
+                  <span className="text-[#F5F5F5]">{tech.intent}</span>
+                </div>
+              ) : null;
+            })()}
             <Batter3DCanvas
               shotName={comparison.shot_type}
               isGhost={true}

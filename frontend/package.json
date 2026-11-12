@@ -11,6 +11,7 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "oxlint",
+    "check:shots": "node scripts/checkShots.js",
     "test:e2e": "playwright test",
     "preview": "vite preview"
   },

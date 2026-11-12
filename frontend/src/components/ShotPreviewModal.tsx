@@ -26,6 +26,7 @@ import { RealisticBatterVisualizer } from './RealisticBatterVisualizer';
 import { Batter3DCanvas } from './3d/Batter3DCanvas';
 import { getShotAnimation, ShotAnimationDefinition } from '../data/shotAnimations';
 import { createShotVariant, nextShotVariant } from '../data/shotVariants';
+import { getShotTechnique } from '../data/shotTechnique';
 
 interface ShotPreviewModalProps {
   shot: CricketShot;
@@ -224,6 +225,16 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#F5F5F5] tracking-tight">
               {shot.name}
             </h2>
+            {/* Coaching Intent */}
+            {(() => {
+              const tech = getShotTechnique(shot.name || shot.id);
+              return tech?.intent ? (
+                <div className="text-xs text-[#7FEA35] font-medium flex items-center gap-1.5 pt-0.5">
+                  <Compass className="w-3.5 h-3.5 shrink-0" />
+                  <span>Intent: {tech.intent}</span>
+                </div>
+              ) : null;
+            })()}
             {refDetail && (
               <p className="text-xs text-[#A5A9AD] flex items-center space-x-2">
                 <span className="text-[#F5F5F5] font-semibold">{refDetail.player_name}</span>

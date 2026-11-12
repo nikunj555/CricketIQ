@@ -4,6 +4,7 @@ import { AnalysisResult, NavTab } from '../types/cricket';
 import { api } from '../services/api';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { RealisticBatterVisualizer } from '../components/RealisticBatterVisualizer';
+import { getShotTechnique } from '../data/shotTechnique';
 
 interface PhasesPageProps {
   sessionId: string | null;
@@ -179,6 +180,16 @@ export const PhasesPage: React.FC<PhasesPageProps> = ({ sessionId, onSelectTab }
                   Phase {selectedPhaseIdx + 1}/7: {activePhase.phase_name}
                 </span>
               </div>
+              {/* Technique Coaching Intent */}
+              {(() => {
+                const tech = getShotTechnique(analysis.shot_type);
+                return tech?.intent ? (
+                  <div className="px-4 py-2 bg-[#181B1D] border-b border-[#303438] text-xs text-[#7FEA35] flex items-center gap-2">
+                    <span className="font-bold uppercase tracking-wider text-[10px] bg-[#7FEA35]/15 px-2 py-0.5 rounded text-[#7FEA35]">Coaching Intent</span>
+                    <span className="text-[#F5F5F5]">{tech.intent}</span>
+                  </div>
+                ) : null;
+              })()}
               <RealisticBatterVisualizer
                 shotName={analysis.shot_type}
                 handedness={analysis.handedness === 'Left' ? 'Left' : 'Right'}
