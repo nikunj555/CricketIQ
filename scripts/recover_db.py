@@ -11,11 +11,8 @@ db_path = Path("storage/cricketiq.db")
 bak_path = Path("storage/cricketiq.db.corrupt_bak")
 recovered_path = Path("storage/cricketiq.db.new")
 
-if not bak_path.exists():
-    shutil.copy2(db_path, bak_path)
-
-if recovered_path.exists():
-    recovered_path.unlink()
+if db_path.exists():
+    shutil.move(db_path, bak_path)
 
 # Initialize clean schema in new db using session_repository logic
 from backend.app.repositories.session_repository import SessionRepository

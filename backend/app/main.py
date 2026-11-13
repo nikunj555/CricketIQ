@@ -101,15 +101,19 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Include API routes
+# Include API routes (both under /api and root alias for universal client compatibility)
 app.include_router(health.router, prefix=settings.API_PREFIX)
+app.include_router(health.router, include_in_schema=False)
 app.include_router(video.router, prefix=settings.API_PREFIX)
+app.include_router(video.router, include_in_schema=False)
 app.include_router(analysis.router, prefix=settings.API_PREFIX)
+app.include_router(analysis.router, include_in_schema=False)
 app.include_router(comparison.router, prefix=settings.API_PREFIX)
 app.include_router(sessions.router, prefix=settings.API_PREFIX)
 app.include_router(evaluation.router, prefix=settings.API_PREFIX)
 app.include_router(live.router, prefix=settings.API_PREFIX)
 app.include_router(shots.router, prefix=settings.API_PREFIX)
+app.include_router(shots.router, include_in_schema=False)
 app.include_router(reference.router, prefix=settings.API_PREFIX)
 app.include_router(progress.router, prefix=settings.API_PREFIX)
 

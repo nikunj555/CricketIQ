@@ -28,7 +28,6 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { LivePoseState, LiveAttemptFeedback, CricketShot, AnalysisResult, NavTab } from '../types/cricket';
-import { RealisticBatterVisualizer } from '../components/RealisticBatterVisualizer';
 import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 import { getShotTechnique } from '../data/shotTechnique';
 
@@ -61,7 +60,6 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
   const [targetShot, setTargetShot] = useState<string>(initialTargetShot || 'Cover Drive');
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
   const [showReferenceCoach, setShowReferenceCoach] = useState<boolean>(true);
-  const [coachAvatarMode, setCoachAvatarMode] = useState<'3d' | 'blueprint'>('3d');
 
   // Recording State Machine (Idle -> Countdown -> Recording -> Reviewing -> Analyzing)
   const [recordingState, setRecordingState] = useState<'idle' | 'countdown' | 'recording' | 'reviewing' | 'analyzing'>('idle');
@@ -1305,28 +1303,6 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
                     Reference Form: {targetShot}
                   </span>
                 </div>
-                <div className="flex items-center space-x-1.5">
-                  <button
-                    onClick={() => setCoachAvatarMode('3d')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                      coachAvatarMode === '3d'
-                        ? 'bg-[#7FEA35] text-[#050505]'
-                        : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
-                    }`}
-                  >
-                    3D
-                  </button>
-                  <button
-                    onClick={() => setCoachAvatarMode('blueprint')}
-                    className={`px-2 py-0.5 rounded text-[10px] font-mono font-bold transition-all cursor-pointer ${
-                      coachAvatarMode === 'blueprint'
-                        ? 'bg-[#00f0ff] text-[#050505]'
-                        : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
-                    }`}
-                  >
-                    2D
-                  </button>
-                </div>
               </div>
               {/* Technique Coaching Intent */}
               {(() => {
@@ -1338,25 +1314,15 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
                   </div>
                 ) : null;
               })()}
-              {coachAvatarMode === '3d' ? (
-                <Batter3DCanvas
-                  shotName={targetShot}
-                  height={320}
-                  showTrail={true}
-                  showControls={true}
-                  showPhaseScrubber={false}
-                  showCameraPresets={true}
-                  autoOrbitDefault={false}
-                />
-              ) : (
-                <RealisticBatterVisualizer
-                  shotName={targetShot}
-                  handedness={handedness as 'Right' | 'Left'}
-                  initialPhaseIndex={4}
-                  showControls={true}
-                  autoPlay={false}
-                />
-              )}
+              <Batter3DCanvas
+                shotName={targetShot}
+                height={320}
+                showTrail={true}
+                showControls={true}
+                showPhaseScrubber={false}
+                showCameraPresets={true}
+                autoOrbitDefault={false}
+              />
             </div>
           )}
 

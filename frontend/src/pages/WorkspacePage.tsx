@@ -26,7 +26,7 @@ import { api } from '../services/api';
 import { MetricCard } from '../components/MetricCard';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { CoachingFeedbackList } from '../components/CoachingFeedbackList';
-import { RealisticBatterVisualizer, getPoseForShotAndPhase } from '../components/RealisticBatterVisualizer';
+import { getPoseForShotAndPhase } from '../components/RealisticBatterVisualizer';
 import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface WorkspacePageProps {
@@ -70,7 +70,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
   const [viewMode, setViewMode] = useState<'single' | 'synced'>('single');
   const [singleSource, setSingleSource] = useState<'original' | 'annotated'>('original');
   const [show3DComparison, setShow3DComparison] = useState<boolean>(false);
-  const [comparisonType, setComparisonType] = useState<'3d' | 'blueprint'>('3d');
   const [activeMistakeJoint, setActiveMistakeJoint] = useState<string | null>(null);
   const [hasEnded, setHasEnded] = useState<boolean>(false);
   const [isSwitchingStriker, setIsSwitchingStriker] = useState<boolean>(false);
@@ -1389,26 +1388,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
               <span className="text-xs font-mono text-[#A5A9AD] mr-2">
                 Phase: <strong className="text-white">{currentPhase}</strong>
               </span>
-              <button
-                onClick={() => setComparisonType('3d')}
-                className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg transition-colors cursor-pointer ${
-                  comparisonType === '3d'
-                    ? 'bg-[#7FEA35] text-[#050505]'
-                    : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
-                }`}
-              >
-                3D Forward Kinematics
-              </button>
-              <button
-                onClick={() => setComparisonType('blueprint')}
-                className={`px-2.5 py-1 text-[10px] font-mono font-bold rounded-lg transition-colors cursor-pointer ${
-                  comparisonType === 'blueprint'
-                    ? 'bg-[#00f0ff] text-[#050505]'
-                    : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white'
-                }`}
-              >
-                2D Blueprint
-              </button>
             </div>
           </div>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1432,28 +1411,17 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                 )}
               </div>
               <div className="rounded-xl overflow-hidden border border-[#303438] aspect-video bg-[#0d0f11]">
-                {comparisonType === '3d' ? (
-                  <Batter3DCanvas
-                    shotName={analysis.shot_type}
-                    isGhost={true}
-                    ghostColor="#00f0ff"
-                    highlightJoint={activeMistakeJoint}
-                    showControls={false}
-                    showPhaseScrubber={false}
-                    showCameraPresets={true}
-                    autoOrbitDefault={false}
-                    height="100%"
-                  />
-                ) : (
-                  <RealisticBatterVisualizer
-                    shotName={analysis.shot_type}
-                    initialPhaseIndex={getPhaseIndex(currentPhase)}
-                    handedness={analysis.handedness as any}
-                    cameraView={analysis.detected_camera_view || 'side'}
-                    showControls={false}
-                    className="w-full h-full"
-                  />
-                )}
+                <Batter3DCanvas
+                  shotName={analysis.shot_type}
+                  isGhost={true}
+                  ghostColor="#00f0ff"
+                  highlightJoint={activeMistakeJoint}
+                  showControls={false}
+                  showPhaseScrubber={false}
+                  showCameraPresets={true}
+                  autoOrbitDefault={false}
+                  height="100%"
+                />
               </div>
             </div>
           </div>

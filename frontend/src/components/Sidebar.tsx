@@ -87,7 +87,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const [copiedSession, setCopiedSession] = useState(false);
-  const [isAiOnline, setIsAiOnline] = useState<boolean | null>(null);
+  const [healthStatus, setHealthStatus] = useState<'healthy' | 'degraded' | 'offline' | 'checking'>('checking');
+  const [healthIssues, setHealthIssues] = useState<string[]>([]);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
   // Poll /api/health every 15s with debounce and grace counter to prevent flickering "AI Offline"
@@ -96,17 +97,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const checkHealth = useCallback(async () => {
     const t0 = performance.now();
     try {
-      await api.getHealth();
+      const data = await api.getHealth();
       const elapsed = Math.round(performance.now() - t0);
       consecutiveFailuresRef.current = 0;
-      setIsAiOnline(true);
+      setHealthStatus(data.status === 'degraded' ? 'degraded' : 'healthy');
+      setHealthIssues(data.issues || []);
       setLatencyMs(elapsed);
     } catch {
       consecutiveFailuresRef.current += 1;
       // Require 2 consecutive failed health checks before marking AI offline
       // This absorbs single network hiccups, latency spikes, or temporary 502 spin-up cycles
       if (consecutiveFailuresRef.current >= 2) {
-        setIsAiOnline(false);
+        setHealthStatus('offline');
+        setHealthIssues(['Backend server is unreachable']);
         setLatencyMs(null);
       }
     }
@@ -290,9 +293,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           )}
         </div>
 
-        {/* AI Online/Offline Status Indicator */}
+        {/* AI Online/Degraded/Offline Status Indicator */}
         <div className="relative group">
           <div
+            title={healthIssues.length > 0 ? healthIssues.join(' | ') : healthStatus === 'healthy' ? `AI Engine Healthy (${latencyMs ?? 0}ms)` : 'Checking health...'}
             className={`flex items-center rounded-lg bg-[#111315] border border-[#303438] ${
               collapsed
                 ? 'justify-center h-9 w-9 mx-auto'
@@ -301,36 +305,60 @@ export const Sidebar: React.FC<SidebarProps> = ({
           >
             <div className="flex items-center space-x-2">
               <span className="relative flex h-2 w-2 shrink-0">
-                {isAiOnline ? (
+                {healthStatus === 'healthy' ? (
                   <>
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#7FEA35] opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-[#7FEA35]" />
                   </>
-                ) : (
+                ) : healthStatus === 'degraded' ? (
+                  <>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-amber-400" />
+                  </>
+                ) : healthStatus === 'offline' ? (
                   <span className="relative inline-flex rounded-full h-2 w-2 bg-rose-500" />
+                ) : (
+                  <span className="relative inline-flex rounded-full h-2 w-2 bg-slate-500 animate-pulse" />
                 )}
               </span>
               {!collapsed && (
                 <span className="text-[11px] font-mono text-[#F5F5F5]">
-                  {isAiOnline === null
+                  {healthStatus === 'checking'
                     ? 'Checking AI...'
-                    : isAiOnline
+                    : healthStatus === 'healthy'
                     ? 'AI Online'
+                    : healthStatus === 'degraded'
+                    ? 'AI Degraded'
                     : 'AI Offline'}
                 </span>
               )}
             </div>
             {!collapsed && latencyMs !== null && (
-              <span className="text-[10px] font-mono text-[#7FEA35] font-medium">
+              <span className={`text-[10px] font-mono font-medium ${
+                healthStatus === 'healthy' ? 'text-[#7FEA35]' : healthStatus === 'degraded' ? 'text-amber-400' : 'text-rose-400'
+              }`}>
                 {latencyMs}ms
               </span>
             )}
           </div>
-          {collapsed && (
-            <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1 rounded bg-[#181B1D] text-[#F5F5F5] text-xs font-medium border border-[#303438] whitespace-nowrap shadow-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50">
-              {isAiOnline ? `AI Online (${latencyMs ?? 0}ms)` : 'AI Offline'}
+          {/* Tooltip for issues or collapsed view */}
+          <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-[#181B1D] text-[#F5F5F5] text-xs font-medium border border-[#303438] whitespace-nowrap shadow-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 space-y-1">
+            <div className="font-bold flex items-center space-x-1.5">
+              <span className={`w-2 h-2 rounded-full ${healthStatus === 'healthy' ? 'bg-[#7FEA35]' : healthStatus === 'degraded' ? 'bg-amber-400' : 'bg-rose-500'}`} />
+              <span>
+                {healthStatus === 'healthy'
+                  ? `AI Engine Online (${latencyMs ?? 0}ms)`
+                  : healthStatus === 'degraded'
+                  ? 'AI Subsystem Degraded'
+                  : 'AI Backend Offline'}
+              </span>
             </div>
-          )}
+            {healthIssues.length > 0 && (
+              <div className="text-[10px] font-mono text-[#A5A9AD] max-w-xs whitespace-normal">
+                {healthIssues.join(' • ')}
+              </div>
+            )}
+          </div>
         </div>
 
         {/* Active Session Chip */}

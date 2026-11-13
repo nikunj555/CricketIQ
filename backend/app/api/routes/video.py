@@ -133,16 +133,21 @@ async def upload_video(
         raise HTTPException(status_code=400, detail=val["error"])
 
     # Register in repository
-    session_repo.create_session(
-        session_id=session_id,
-        video_filename=file.filename,
-        original_path=str(saved_path),
-        shot_type=shot_type,
-        handedness=handedness,
-        camera_angle=camera_angle,
-        striker_track_id=parsed_striker_track_id,
-        striker_tap_coords=striker_tap_coords
-    )
+    try:
+        session_repo.create_session(
+            session_id=session_id,
+            video_filename=file.filename,
+            original_path=str(saved_path),
+            shot_type=shot_type,
+            handedness=handedness,
+            camera_angle=camera_angle,
+            striker_track_id=parsed_striker_track_id,
+            striker_tap_coords=striker_tap_coords
+        )
+    except sqlite3.Error as db_err:
+        logger.exception(f"Database error registering session {session_id}: {db_err}")
+        saved_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=500, detail=f"Database error registering video session: {str(db_err)}")
 
     # Queue background processing
     background_tasks.add_task(video_service.process_video_session, session_id)

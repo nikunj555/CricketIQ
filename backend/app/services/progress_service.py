@@ -149,6 +149,8 @@ class ProgressService:
                 "trend_data": [],
                 "metric_trends": {},
                 "metric_comparisons": [],
+                "plain_progress_statements": [],
+                "dual_tracking": [],
                 "summary_sentence": f"No completed sessions recorded yet for {canonical_shot}.",
                 "recurring_mistakes": [],
                 "is_trend_reliable": False,

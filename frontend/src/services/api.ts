@@ -16,16 +16,32 @@ import {
 const isVercelHost =
   typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
 
-const rawBase =
-  import.meta.env.VITE_API_BASE ||
-  import.meta.env.VITE_API_BASE_URL ||
-  (isVercelHost
-    ? 'https://cricketiq-1-ekqx.onrender.com/api'
-    : (typeof window !== 'undefined'
-        ? `${window.location.origin}/api`
-        : 'http://127.0.0.1:8000/api'));
+function resolveApiBase(): string {
+  const envUrl = (
+    import.meta.env.VITE_API_BASE ||
+    import.meta.env.VITE_API_BASE_URL ||
+    ''
+  ).trim();
 
-const API_BASE = rawBase.replace(/\/+$/, '');
+  let base = envUrl;
+  if (!base) {
+    if (isVercelHost) {
+      base = 'https://cricketiq-1-ekqx.onrender.com/api';
+    } else if (typeof window !== 'undefined') {
+      base = `${window.location.origin}/api`;
+    } else {
+      base = 'http://127.0.0.1:8000/api';
+    }
+  }
+
+  base = base.replace(/\/+$/, '');
+  if (!base.endsWith('/api')) {
+    base = `${base}/api`;
+  }
+  return base;
+}
+
+const API_BASE = resolveApiBase();
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const isHealthCheck = typeof input === 'string' && input.includes('/health');

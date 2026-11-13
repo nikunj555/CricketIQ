@@ -4,6 +4,8 @@ import gc
 import time
 import math
 import logging
+import sqlite3
+import subprocess
 import numpy as np
 from typing import Dict, Any, Optional, List
 from pathlib import Path
@@ -861,17 +863,11 @@ class VideoService:
             )
             logger.info(f"Session {session_id} processed successfully.")
 
-        except (cv2.error, sqlite3.Error, FileNotFoundError, ValueError, RuntimeError, OSError) as e:
+        except (cv2.error, sqlite3.Error, FileNotFoundError, PermissionError, OSError, IOError, ValueError, TypeError, KeyError, IndexError, RuntimeError, subprocess.SubprocessError, subprocess.TimeoutExpired) as e:
             if 'cap' in locals() and cap is not None and cap.isOpened():
                 cap.release()
-            logger.exception(f"Service error processing session {session_id}: {e}")
-            session_repo.update_progress(session_id, "failed", 0.0, "Processing failure", f"{type(e).__name__}: {str(e)}")
-
-        except Exception as e:
-            if 'cap' in locals() and cap is not None and cap.isOpened():
-                cap.release()
-            logger.exception(f"Unexpected error processing session {session_id}: {e}")
-            session_repo.update_progress(session_id, "failed", 0.0, "Processing failure", str(e))
+            logger.exception(f"Processing error in session {session_id}: {type(e).__name__}: {e}")
+            session_repo.update_progress(session_id, "failed", 0.0, f"Processing failure: {type(e).__name__}", f"{type(e).__name__}: {str(e)}")
 
     def reanalyze_shot(self, session_id: str, new_shot: str, lang: str = "en") -> Optional[Dict[str, Any]]:
         """

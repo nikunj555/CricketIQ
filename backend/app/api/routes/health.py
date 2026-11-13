@@ -43,8 +43,16 @@ def health_check():
     except sqlite3.Error:
         db_writable = False
 
-    # FFmpeg diagnostics
+    # FFmpeg diagnostics: check system PATH and bundled imageio-ffmpeg binary
     ffmpeg_path = shutil.which("ffmpeg")
+    if not ffmpeg_path:
+        try:
+            import imageio_ffmpeg
+            candidate = imageio_ffmpeg.get_ffmpeg_exe()
+            if candidate and Path(candidate).exists():
+                ffmpeg_path = candidate
+        except (ImportError, OSError):
+            ffmpeg_path = None
     ffmpeg_available = ffmpeg_path is not None
 
     # Storage diagnostics
@@ -70,13 +78,13 @@ def health_check():
     # Check overall system health
     issues = []
     if not pose_loaded:
-        issues.append("MediaPipe Pose Landmarker full model is not loaded.")
+        issues.append(f"MediaPipe Pose Landmarker is not loaded ({getattr(pose_service, 'init_error', 'initialization failed')}).")
     if not phase_loaded:
-        issues.append("BiLSTM Temporal Action Phase Classifier model is not loaded.")
+        issues.append("BiLSTM Temporal Action Phase model not loaded (falling back to kinematic rule-based phase detector).")
     if not hand_loaded:
         issues.append("MediaPipe Hand Landmarker model is not loaded.")
     if not ffmpeg_available:
-        issues.append("FFmpeg executable not found in system PATH.")
+        issues.append("FFmpeg executable not found (required for browser-compatible video transcoding).")
     if not db_connected:
         issues.append("SQLite database connection failed.")
     elif not db_writable:

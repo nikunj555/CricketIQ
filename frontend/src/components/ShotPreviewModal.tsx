@@ -22,7 +22,6 @@ import {
 } from 'lucide-react';
 import { CricketShot, ReferenceDetail } from '../types/cricket';
 import { api } from '../services/api';
-import { RealisticBatterVisualizer } from './RealisticBatterVisualizer';
 import { Batter3DCanvas } from './3d/Batter3DCanvas';
 import { getShotAnimation, ShotAnimationDefinition } from '../data/shotAnimations';
 import { createShotVariant, nextShotVariant } from '../data/shotVariants';
@@ -47,7 +46,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [previewMode, setPreviewMode] = useState<'blueprint' | '3d' | 'video'>('blueprint');
+  const [previewMode, setPreviewMode] = useState<'3d' | 'video'>('3d');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.75);
   const [activePhaseIndex, setActivePhaseIndex] = useState<number>(0); // Default to Stance
@@ -273,7 +272,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
         </div>
 
-        {/* Preview Mode Selector: 3D Kinematics vs 2D Blueprint vs Authentic Video */}
+        {/* Preview Mode Selector: 3D Reference Model vs Authentic Video */}
         <div className="flex flex-wrap items-center justify-between border-b border-[#303438] pb-3 gap-2">
           <div className="flex items-center space-x-2">
             <button
@@ -286,17 +285,6 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             >
               <Sparkles className="w-3.5 h-3.5" />
               <span>Reference Technique Model</span>
-            </button>
-            <button
-              onClick={() => setPreviewMode('blueprint')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                previewMode === 'blueprint'
-                  ? 'bg-[#00f0ff] text-black shadow-md'
-                  : 'bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] border border-[#303438]'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>2D Kinematic Blueprint</span>
             </button>
             <button
               onClick={() => setPreviewMode('video')}
@@ -312,9 +300,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
           <span className="text-[11px] font-mono text-[#A5A9AD] hidden md:inline">
             {previewMode === '3d'
-              ? 'WebGL forward kinematics on 3D pitch'
-              : previewMode === 'blueprint'
-              ? 'Multi-view 2D biomechanical blueprint'
+              ? '3D Reference Technique Model on interactive pitch'
               : 'Masterclass benchmark footage'}
           </span>
         </div>
@@ -378,18 +364,6 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             showPhaseScrubber={true}
             showCameraPresets={true}
             autoOrbitDefault={false}
-          />
-        ) : previewMode === 'blueprint' ? (
-          <RealisticBatterVisualizer
-            shotId={shot.id}
-            shotName={shot.name}
-            variant={animationVariant}
-            replayToken={replayToken}
-            category={shot.category}
-            initialPhaseIndex={activePhaseIndex}
-            onPhaseChange={(idx) => setActivePhaseIndex(idx)}
-            autoPlay={true}
-            showControls={false}
           />
         ) : (
           <div className="space-y-3">
