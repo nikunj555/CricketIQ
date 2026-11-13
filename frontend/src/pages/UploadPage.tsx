@@ -153,16 +153,21 @@ export const UploadPage: React.FC<UploadPageProps> = ({
           setUploading(false);
           setError(statusData.error || statusData.current_step || 'Video analysis failed. Please check video readability.');
         }
-      } catch {
+      } catch (err: any) {
         consecutiveErrors += 1;
-        // Don't kill the upload on a transient network delay during heavy video transcoding
-        if (consecutiveErrors >= 10) {
+        if (consecutiveErrors > 2) {
+          setProcessingStatus(`Connecting to analysis server (reconnecting attempt ${consecutiveErrors}/45)...`);
+        }
+        // Allow up to 45 consecutive retries (~60s window) for cloud cold-starts or transcoding pauses
+        if (consecutiveErrors >= 45) {
           clearInterval(pollIntervalRef.current);
           setUploading(false);
-          setError('Lost connection while polling processing status. Please check your network and try again.');
+          setError(
+            'Lost connection while polling processing status. The server may be restarting or experienced high memory load. Please retry with a shorter clip.'
+          );
         }
       }
-    }, 650);
+    }, 1400);
   };
 
   const handleUpload = async (e: React.FormEvent) => {

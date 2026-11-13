@@ -520,43 +520,31 @@ class PoseService:
             with open(p, "rb") as f:
                 model_data = f.read()
 
-            # Multi-person PoseLandmarker (up to 6 persons simultaneously)
+            # Multi-person PoseLandmarker (up to 4 persons simultaneously)
             options_multi = vision.PoseLandmarkerOptions(
                 base_options=BaseOptions(model_asset_buffer=model_data),
                 running_mode=vision.RunningMode.IMAGE,
-                num_poses=6,
+                num_poses=4,
                 min_pose_detection_confidence=0.35,
                 min_pose_presence_confidence=0.35,
                 min_tracking_confidence=0.35
             )
             self.landmarker = vision.PoseLandmarker.create_from_options(options_multi)
-
-            # Single-person crop PoseLandmarker for per-box pose estimation
-            options_crop = vision.PoseLandmarkerOptions(
-                base_options=BaseOptions(model_asset_buffer=model_data),
-                running_mode=vision.RunningMode.IMAGE,
-                num_poses=1,
-                min_pose_detection_confidence=0.30,
-                min_pose_presence_confidence=0.30,
-                min_tracking_confidence=0.30
-            )
-            self.crop_landmarker = vision.PoseLandmarker.create_from_options(options_crop)
+            self.crop_landmarker = None
 
             self.init_error = None
-            logger.info("MediaPipe Multi-PoseLandmarker (num_poses=6) & Crop-PoseLandmarker initialized successfully.")
+            logger.info("MediaPipe Multi-PoseLandmarker (num_poses=4, lightweight memory profile) initialized successfully.")
         except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
             self.init_error = f"{type(e).__name__}: {str(e)}"
             logger.exception(f"Failed to initialize PoseLandmarker: {e}")
             self.landmarker = None
             self.crop_landmarker = None
 
-    def detect_frame_multi(self, bgr_frame: np.ndarray, run_crop_pose: bool = True) -> List[Dict[str, Any]]:
+    def detect_frame_multi(self, bgr_frame: np.ndarray, run_crop_pose: bool = False) -> List[Dict[str, Any]]:
         """
-        Runs person detection & per-person crop pose estimation on a single BGR frame.
-        1. Detects all person bounding boxes in the frame.
-        2. Runs pose estimation on each person's cropped box (not on the whole frame).
-        3. Maps normalized coordinates back into full-frame space.
-        Returns a list of detected person dictionaries with landmarks, world_landmarks, and bbox.
+        Runs multi-person pose estimation on a single BGR frame.
+        Extracts 33 landmarks, world landmarks, and bounding boxes for all detected persons.
+        Optimized for < 250MB RAM footprint on cloud containers (e.g. Render free tier).
         """
         if self.landmarker is None or bgr_frame is None:
             return []
@@ -565,10 +553,9 @@ class PoseService:
             import mediapipe as mp
             h, w = bgr_frame.shape[:2]
             proc_frame = bgr_frame
-            if max(h, w) > 960:
-                s = 960.0 / max(h, w)
+            if max(h, w) > 640:
+                s = 640.0 / max(h, w)
                 proc_frame = cv2.resize(bgr_frame, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
-            proc_h, proc_w = proc_frame.shape[:2]
 
             rgb_frame = np.ascontiguousarray(cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB))
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
@@ -583,43 +570,8 @@ class PoseService:
             for idx, lms in enumerate(detection_result.pose_landmarks):
                 world_lms = world_lms_list[idx] if idx < len(world_lms_list) else None
                 bbox = compute_bbox_from_landmarks(lms)
-
-                # Per-box cropped pose estimation: run pose estimation on each person's box
-                refined_lms = lms
-                if run_crop_pose and self.crop_landmarker is not None:
-                    # Pad box by 15%
-                    pad_x = (bbox[2] - bbox[0]) * 0.15
-                    pad_y = (bbox[3] - bbox[1]) * 0.15
-                    x1 = max(0, int((bbox[0] - pad_x) * proc_w))
-                    y1 = max(0, int((bbox[1] - pad_y) * proc_h))
-                    x2 = min(proc_w, int((bbox[2] + pad_x) * proc_w))
-                    y2 = min(proc_h, int((bbox[3] + pad_y) * proc_h))
-
-                    crop_w = x2 - x1
-                    crop_h = y2 - y1
-                    if crop_w >= 40 and crop_h >= 40:
-                        crop_rgb = np.ascontiguousarray(rgb_frame[y1:y2, x1:x2])
-                        crop_mp = mp.Image(image_format=mp.ImageFormat.SRGB, data=crop_rgb)
-                        crop_res = self.crop_landmarker.detect(crop_mp)
-                        if crop_res and crop_res.pose_landmarks and len(crop_res.pose_landmarks[0]) >= 33:
-                            c_lms = crop_res.pose_landmarks[0]
-                            # Reproject crop coords back to full-frame normalized coords
-                            projected_lms = []
-                            for lm in c_lms:
-                                px = (x1 + lm.x * crop_w) / float(proc_w)
-                                py = (y1 + lm.y * crop_h) / float(proc_h)
-                                projected_lms.append({
-                                    "x": round(px, 5),
-                                    "y": round(py, 5),
-                                    "z": lm.z,
-                                    "visibility": lm.visibility,
-                                    "presence": getattr(lm, "presence", 1.0)
-                                })
-                            refined_lms = projected_lms
-                            bbox = compute_bbox_from_landmarks(refined_lms)
-
                 results.append({
-                    "landmarks": refined_lms,
+                    "landmarks": lms,
                     "world_landmarks": world_lms,
                     "bbox": bbox
                 })

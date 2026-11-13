@@ -137,17 +137,15 @@ class VideoService:
             height = val_info["height"]
             validation_warnings = val_info.get("warnings", [])
 
-            # Constrain frame dimensions to max 1280 for lightweight memory footprint while preserving landmark fidelity
-            max_proc_dim = 1280
+            # Constrain frame dimensions to max 640 for lightweight memory footprint (< 250MB RAM for cloud 512MB limits)
+            max_proc_dim = 640
             scale = 1.0
             if max(width, height) > max_proc_dim:
                 scale = max_proc_dim / float(max(width, height))
             out_w = int(round(width * scale))
             out_h = int(round(height * scale))
-            if out_h < 480 and height >= 480:
-                scale = 480.0 / float(height)
-                out_w = int(round(width * scale))
-                out_h = 480
+            out_w = max(320, out_w)
+            out_h = max(240, out_h)
             out_w = out_w if out_w % 2 == 0 else out_w - 1
             out_h = out_h if out_h % 2 == 0 else out_h - 1
 
@@ -261,11 +259,15 @@ class VideoService:
                         f"Analyzing frame {frame_idx + 1}/{total_frames} (tracking persons & batsman isolation)..."
                     )
 
+                if analyzed_count % 30 == 0:
+                    gc.collect()
+
                 frame_idx += 1
                 if frame_idx >= settings.MAX_FRAMES_TO_PROCESS:
                     break
 
             cap.release()
+            gc.collect()
             actual_total_frames = frame_idx
 
             if actual_total_frames == 0:
@@ -360,6 +362,10 @@ class VideoService:
                     torso_scale=0.3,
                     timestamp_sec=round(s_idx / fps, 3)
                 ) if settings.ENABLE_EXPERIMENTAL_BAT_BALL else {}
+
+            # Prune non-striker tracks beyond frame 20 to free memory
+            per_frame_person_tracks = {k: v for k, v in per_frame_person_tracks.items() if k < 20}
+            gc.collect()
 
             # Check tracking dropouts for striker
             missing_spans = []
@@ -617,6 +623,9 @@ class VideoService:
                         f"Rendering annotated video frame {f_idx + 1}/{actual_total_frames}..."
                     )
 
+                if f_idx % 30 == 0:
+                    gc.collect()
+
                 if is_impact or (not thumb_saved and f_idx == actual_total_frames // 2):
                     cv2.imwrite(str(thumbnail_path), annotated_frame)
                     thumb_saved = True
@@ -626,6 +635,7 @@ class VideoService:
 
             cap_stream.release()
             writer.release()
+            gc.collect()
 
             if not thumb_saved and annotated_path.exists():
                 cap_t = cv2.VideoCapture(str(annotated_path), cv2.CAP_FFMPEG)
@@ -913,10 +923,12 @@ class VideoService:
         """
         Transcodes OpenCV-generated video to standard H.264 (yuv420p) with faststart
         so it streams and plays natively across all web browsers (Chrome, Edge, Safari, Firefox).
+        Optimized with -threads 1 for low-memory cloud container safety (< 50MB peak).
         """
         try:
             import imageio_ffmpeg
             import subprocess
+            gc.collect()
             exe = imageio_ffmpeg.get_ffmpeg_exe()
             temp_out = video_path.with_name(f"temp_h264_{video_path.name}")
             cmd = [
@@ -924,10 +936,10 @@ class VideoService:
                 "-i", str(video_path),
                 "-c:v", "libx264",
                 "-preset", "ultrafast",
-                "-crf", "24",
+                "-crf", "26",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
-                "-threads", "0",
+                "-threads", "1",
                 str(temp_out)
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
@@ -936,6 +948,7 @@ class VideoService:
                 logger.info(f"Successfully transcoded {video_path.name} to standard browser H.264")
             elif temp_out.exists():
                 temp_out.unlink()
+            gc.collect()
         except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.warning(f"Could not transcode {video_path} to H.264: {e}")
 

@@ -67,6 +67,11 @@ async function apiFetch(input: string, init?: RequestInit, retries: number = 2):
       };
       const response = await fetch(input, fetchInit);
       clearTimeout(timeoutId);
+      // Retry transient 502/503/504 gateway or cold-start hiccups from hosting providers (Render)
+      if ((response.status === 502 || response.status === 503 || response.status === 504) && attempt < retries) {
+        await delay(800 * (attempt + 1));
+        continue;
+      }
       return response;
     } catch (err: unknown) {
       clearTimeout(timeoutId);
