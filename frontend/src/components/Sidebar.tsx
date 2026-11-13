@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   LayoutDashboard,
   Video,
@@ -90,23 +90,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [isAiOnline, setIsAiOnline] = useState<boolean | null>(null);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
-  // Poll /api/health every 10 seconds for real AI online status & latency
+  // Poll /api/health every 15s with debounce and grace counter to prevent flickering "AI Offline"
+  const consecutiveFailuresRef = useRef<number>(0);
+
   const checkHealth = useCallback(async () => {
     const t0 = performance.now();
     try {
       await api.getHealth();
       const elapsed = Math.round(performance.now() - t0);
+      consecutiveFailuresRef.current = 0;
       setIsAiOnline(true);
       setLatencyMs(elapsed);
     } catch {
-      setIsAiOnline(false);
-      setLatencyMs(null);
+      consecutiveFailuresRef.current += 1;
+      // Require 2 consecutive failed health checks before marking AI offline
+      // This absorbs single network hiccups, latency spikes, or temporary 502 spin-up cycles
+      if (consecutiveFailuresRef.current >= 2) {
+        setIsAiOnline(false);
+        setLatencyMs(null);
+      }
     }
   }, []);
 
   useEffect(() => {
     checkHealth();
-    const interval = setInterval(checkHealth, 10000);
+    const interval = setInterval(checkHealth, 15000);
     return () => clearInterval(interval);
   }, [checkHealth]);
 

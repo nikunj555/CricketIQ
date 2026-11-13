@@ -6,6 +6,14 @@
       "destination": "https://cricketiq-1-ekqx.onrender.com/api/:path*"
     },
     {
+      "source": "/videos/:path*",
+      "destination": "https://cricketiq-1-ekqx.onrender.com/videos/:path*"
+    },
+    {
+      "source": "/thumbnails/:path*",
+      "destination": "https://cricketiq-1-ekqx.onrender.com/thumbnails/:path*"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

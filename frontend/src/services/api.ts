@@ -22,20 +22,34 @@ const rawBase =
 const API_BASE = rawBase.replace(/\/+$/, '');
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+  const isHealthCheck = typeof input === 'string' && input.includes('/health');
+  const timeoutMs = isHealthCheck ? 8000 : 45000;
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
   try {
-    return await fetch(input, init);
+    const fetchInit: RequestInit = {
+      ...init,
+      signal: init?.signal || controller.signal,
+    };
+    return await fetch(input, fetchInit);
   } catch (err: unknown) {
     const errorObj = err as { name?: string; message?: string };
     if (
+      errorObj?.name === 'AbortError' ||
       errorObj?.name === 'TypeError' ||
       errorObj?.message?.includes('Failed to fetch') ||
-      errorObj?.message?.includes('NetworkError')
+      errorObj?.message?.includes('NetworkError') ||
+      errorObj?.message?.includes('aborted')
     ) {
       throw new Error(
-        'Backend server unreachable. Please verify the CricketIQ engine is running at http://127.0.0.1:8000.'
+        'Backend server unreachable or timing out. Please check server connectivity.'
       );
     }
     throw err;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
