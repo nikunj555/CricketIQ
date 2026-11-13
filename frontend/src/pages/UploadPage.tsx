@@ -46,6 +46,14 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     }).catch(() => {});
   }, []);
 
+  useEffect(() => {
+    return () => {
+      if (pollIntervalRef.current) {
+        clearInterval(pollIntervalRef.current);
+      }
+    };
+  }, []);
+
   const [uploading, setUploading] = useState(false);
   const [processingStatus, setProcessingStatus] = useState<string>('');
   const [progress, setProgress] = useState<number>(0);
@@ -93,7 +101,8 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     setSelectedFile(file);
     setPreviewUrl(URL.createObjectURL(file));
     setError(null);
-    checkStrikers(file);
+    setStrikerInspection(null);
+    setSelectedTrackId(null);
     return true;
   };
 
@@ -116,33 +125,44 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
   const pollStatus = (sessionId: string) => {
     let consecutiveErrors = 0;
+    if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
     pollIntervalRef.current = setInterval(async () => {
       try {
         const statusData = await api.getProcessingStatus(sessionId);
         consecutiveErrors = 0; // Reset error streak on successful ping
-        setProgress(statusData.progress);
-        setProcessingStatus(statusData.current_step);
+
+        // Map backend progress (0-100%) smoothly onto overall UI progress (25% -> 99%)
+        const backendPct = Math.max(0, Math.min(100, statusData.progress || 0));
+        const mappedPct = Math.min(99, Math.round(25 + (backendPct * 0.74)));
+        setProgress((prev) => Math.max(prev, mappedPct));
+        if (statusData.current_step) {
+          setProcessingStatus(statusData.current_step);
+        }
 
         if (statusData.status === 'completed') {
           clearInterval(pollIntervalRef.current);
-          setUploading(false);
-          onSessionCreated(sessionId);
-          onSelectTab('workspace');
+          setProgress(100);
+          setProcessingStatus('Biomechanical analysis complete! Redirecting to workspace...');
+          setTimeout(() => {
+            setUploading(false);
+            onSessionCreated(sessionId);
+            onSelectTab('workspace');
+          }, 350);
         } else if (statusData.status === 'failed') {
           clearInterval(pollIntervalRef.current);
           setUploading(false);
           setError(statusData.error || statusData.current_step || 'Video analysis failed. Please check video readability.');
         }
-      } catch (err) {
+      } catch {
         consecutiveErrors += 1;
-        // Don't kill the upload on a transient network delay during heavy 80% video transcoding
-        if (consecutiveErrors >= 8) {
+        // Don't kill the upload on a transient network delay during heavy video transcoding
+        if (consecutiveErrors >= 10) {
           clearInterval(pollIntervalRef.current);
           setUploading(false);
           setError('Lost connection while polling processing status. Please check your network and try again.');
         }
       }
-    }, 1500);
+    }, 650);
   };
 
   const handleUpload = async (e: React.FormEvent) => {
@@ -155,8 +175,8 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     try {
       setUploading(true);
       setError(null);
-      setProgress(5);
-      setProcessingStatus('Uploading video to backend storage...');
+      setProgress(3);
+      setProcessingStatus('Connecting and streaming video to server...');
 
       const formData = new FormData();
       formData.append('file', selectedFile);
@@ -167,9 +187,17 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         formData.append('striker_track_id', selectedTrackId.toString());
       }
 
-      const res = await api.uploadVideo(formData);
-      setProgress(15);
-      setProcessingStatus('Video queued. Beginning pose extraction...');
+      // Stream upload with live byte-level progress reporting
+      const res = await api.uploadVideo(formData, (percent, loaded, total) => {
+        const mbLoaded = (loaded / (1024 * 1024)).toFixed(1);
+        const mbTotal = (total / (1024 * 1024)).toFixed(1);
+        const uploadProgress = Math.min(25, Math.max(3, Math.round((percent / 100) * 25)));
+        setProgress(uploadProgress);
+        setProcessingStatus(`Uploading video: ${percent}% (${mbLoaded} MB / ${mbTotal} MB)...`);
+      });
+
+      setProgress(26);
+      setProcessingStatus('Video uploaded. Beginning multi-cue striker isolation & pose extraction...');
       pollStatus(res.session_id);
     } catch (err: any) {
       setUploading(false);
@@ -224,6 +252,20 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                     </span>
                   </div>
                   <p className="text-[11px] text-slate-400">Click or drag a different file to replace</p>
+                  <div className="flex items-center justify-center space-x-3 pt-1">
+                    <button
+                      type="button"
+                      disabled={isInspecting || uploading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (selectedFile) checkStrikers(selectedFile);
+                      }}
+                      className="px-3 py-1.5 text-xs rounded-lg bg-navy-800 hover:bg-navy-750 text-slate-300 hover:text-white border border-navy-700 flex items-center space-x-1.5 transition-all shadow-sm"
+                    >
+                      <Camera className="w-3.5 h-3.5 text-brand-400" />
+                      <span>{isInspecting ? 'Scanning initial frames...' : 'Verify Batter Identification (Optional)'}</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="space-y-3 py-4">
@@ -434,22 +476,40 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 
             {/* Processing State Progress Bar */}
             {uploading && (
-              <div className="bg-navy-900/90 border border-navy-800 p-5 rounded-2xl space-y-3">
+              <div className="bg-navy-900/90 border border-navy-800 p-5 rounded-2xl space-y-4 shadow-xl">
                 <div className="flex items-center justify-between text-xs">
-                  <span className="font-semibold text-white flex items-center space-x-2">
-                    <Loader2 className="w-4 h-4 text-brand-400 animate-spin" />
-                    <span>{processingStatus || 'Processing video...'}</span>
+                  <span className="font-semibold text-white flex items-center space-x-2 truncate pr-2">
+                    <Loader2 className="w-4 h-4 text-brand-400 animate-spin shrink-0" />
+                    <span className="truncate">{processingStatus || 'Processing video...'}</span>
                   </span>
-                  <span className="font-mono text-brand-400 font-bold">{progress.toFixed(0)}%</span>
+                  <span className="font-mono text-brand-400 font-bold shrink-0">{progress.toFixed(0)}%</span>
                 </div>
-                <div className="w-full h-2.5 bg-navy-950 rounded-full overflow-hidden border border-navy-800">
+                
+                <div className="w-full h-3 bg-navy-950 rounded-full overflow-hidden border border-navy-800/80 p-0.5">
                   <div
-                    className="h-full bg-gradient-to-r from-brand-500 to-cricket-sky transition-all duration-300"
-                    style={{ width: `${progress}%` }}
+                    className="h-full bg-gradient-to-r from-brand-500 via-emerald-400 to-cyan-400 rounded-full transition-all duration-500 ease-out shadow-sm"
+                    style={{ width: `${Math.max(2, progress)}%` }}
                   />
                 </div>
-                <p className="text-[11px] text-slate-400">
-                  Tracking body movement, measuring joint angles, and breaking down stroke phases...
+
+                {/* Processing Phase Step Pills */}
+                <div className="grid grid-cols-4 gap-2 text-[10px] text-center font-mono pt-1">
+                  <div className={`px-1.5 py-1 rounded transition-colors ${progress >= 3 && progress <= 25 ? 'bg-brand-500/20 text-brand-300 font-bold border border-brand-500/40' : progress > 25 ? 'text-slate-400' : 'text-slate-600'}`}>
+                    1. Upload
+                  </div>
+                  <div className={`px-1.5 py-1 rounded transition-colors ${progress > 25 && progress <= 50 ? 'bg-brand-500/20 text-brand-300 font-bold border border-brand-500/40' : progress > 50 ? 'text-slate-400' : 'text-slate-600'}`}>
+                    2. Striker Lock
+                  </div>
+                  <div className={`px-1.5 py-1 rounded transition-colors ${progress > 50 && progress <= 78 ? 'bg-brand-500/20 text-brand-300 font-bold border border-brand-500/40' : progress > 78 ? 'text-slate-400' : 'text-slate-600'}`}>
+                    3. Kinematics
+                  </div>
+                  <div className={`px-1.5 py-1 rounded transition-colors ${progress > 78 ? 'bg-brand-500/20 text-brand-300 font-bold border border-brand-500/40' : 'text-slate-600'}`}>
+                    4. Render Video
+                  </div>
+                </div>
+
+                <p className="text-[11px] text-slate-400 leading-relaxed">
+                  Real-time pipeline tracking: isolating the batsman, extracting 33 kinematic landmarks, recognizing stroke phases, and rendering annotated video.
                 </p>
               </div>
             )}

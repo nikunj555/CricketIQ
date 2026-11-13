@@ -69,7 +69,76 @@ export const api = {
     return res.json();
   },
 
-  async uploadVideo(formData: FormData) {
+  async uploadVideo(
+    formData: FormData,
+    onProgress?: (percent: number, loaded: number, total: number) => void
+  ): Promise<{ session_id: string; message: string; original_filename: string; processing_status: string }> {
+    if (typeof XMLHttpRequest !== 'undefined') {
+      return new Promise((resolve, reject) => {
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', `${API_BASE}/video/upload`);
+        xhr.timeout = 180000;
+
+        if (xhr.upload && onProgress) {
+          xhr.upload.onprogress = (event) => {
+            if (event.lengthComputable && event.total > 0) {
+              const percent = Math.min(100, Math.round((event.loaded / event.total) * 100));
+              onProgress(percent, event.loaded, event.total);
+            }
+          };
+        }
+
+        xhr.onload = () => {
+          if (xhr.status >= 200 && xhr.status < 300) {
+            try {
+              const json = JSON.parse(xhr.responseText);
+              resolve(json);
+            } catch {
+              resolve({
+                session_id: '',
+                message: 'Video uploaded successfully',
+                original_filename: '',
+                processing_status: 'queued',
+              });
+            }
+          } else {
+            let errorMsg = '';
+            try {
+              const err = JSON.parse(xhr.responseText);
+              if (typeof err.detail === 'string') {
+                errorMsg = err.detail;
+              } else if (Array.isArray(err.detail)) {
+                errorMsg = err.detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join('; ');
+              } else if (err.message) {
+                errorMsg = err.message;
+              } else if (err.error) {
+                errorMsg = err.error;
+              }
+            } catch {
+              if (xhr.status === 413) {
+                errorMsg = 'Video file exceeds upload size limit (max 150MB). Please select a shorter or compressed clip.';
+              } else if (xhr.status === 502 || xhr.status === 503) {
+                errorMsg = 'Backend AI service is starting up on the server. Please wait 15-30 seconds and retry.';
+              } else if (xhr.status === 504) {
+                errorMsg = 'Gateway timeout: video upload took too long or network connection was interrupted.';
+              }
+            }
+            reject(new Error(errorMsg || `Upload failed with status ${xhr.status} (${xhr.statusText || 'Error'})`));
+          }
+        };
+
+        xhr.onerror = () => {
+          reject(new Error('Backend server unreachable or timing out. Please check server connectivity.'));
+        };
+
+        xhr.ontimeout = () => {
+          reject(new Error('Video upload timed out. Please check your network connection and retry.'));
+        };
+
+        xhr.send(formData);
+      });
+    }
+
     const res = await apiFetch(`${API_BASE}/video/upload`, {
       method: 'POST',
       body: formData,

@@ -228,7 +228,7 @@ class VideoService:
 
                 analyzed_count += 1
                 if scale < 1.0:
-                    proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                    proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
                     del frame
                 else:
                     proc_frame = frame
@@ -252,7 +252,7 @@ class VideoService:
                 hands_info = hand_service.detect_hands(proc_frame, handedness=handedness) if settings.ENABLE_HAND_LANDMARKER else None
                 raw_detected_hands[frame_idx] = hands_info
 
-                if analyzed_count % 15 == 0:
+                if analyzed_count % 5 == 0:
                     pct = 15.0 + min(45.0, (frame_idx / max(1, total_frames)) * 45.0)
                     session_repo.update_progress(
                         session_id, "processing", round(pct, 1),
@@ -575,7 +575,7 @@ class VideoService:
                     break
 
                 if frame.shape[1] != out_w or frame.shape[0] != out_h:
-                    frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_AREA)
+                    frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
 
                 # Draw person bounding boxes on setup frames (0-20) to show striker isolation
                 if f_idx < 20 and f_idx in per_frame_person_tracks:
@@ -608,7 +608,7 @@ class VideoService:
 
                 writer.write(annotated_frame)
 
-                if f_idx % 25 == 0 and actual_total_frames > 0:
+                if f_idx % 8 == 0 and actual_total_frames > 0:
                     render_pct = 80.0 + (f_idx / float(actual_total_frames)) * 8.0
                     session_repo.update_progress(
                         session_id, "processing", round(render_pct, 1),
@@ -931,7 +931,7 @@ class VideoService:
                 "-crf", "24",
                 "-pix_fmt", "yuv420p",
                 "-movflags", "+faststart",
-                "-threads", "1",
+                "-threads", "0",
                 str(temp_out)
             ]
             res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
