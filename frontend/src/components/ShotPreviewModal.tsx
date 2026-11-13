@@ -22,10 +22,7 @@ import {
 } from 'lucide-react';
 import { CricketShot, ReferenceDetail } from '../types/cricket';
 import { api } from '../services/api';
-import { Batter3DCanvas } from './3d/Batter3DCanvas';
 import { getShotAnimation, ShotAnimationDefinition } from '../data/shotAnimations';
-import { createShotVariant, nextShotVariant } from '../data/shotVariants';
-import { getShotTechnique } from '../data/shotTechnique';
 
 interface ShotPreviewModalProps {
   shot: CricketShot;
@@ -46,16 +43,12 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
 
-  const [previewMode, setPreviewMode] = useState<'3d' | 'video'>('3d');
   const [isPlaying, setIsPlaying] = useState<boolean>(true);
   const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.75);
   const [activePhaseIndex, setActivePhaseIndex] = useState<number>(0); // Default to Stance
   const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
   const [uploadFile, setUploadFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState<boolean>(false);
-  const [isVariationActive, setIsVariationActive] = useState<boolean>(false);
-  const [variantId, setVariantId] = useState(0);
-  const [replayToken, setReplayToken] = useState(0);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
 
@@ -63,16 +56,6 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   const shotAnimation: ShotAnimationDefinition | null = useMemo(() => {
     return getShotAnimation(shot.name || shot.id);
   }, [shot.id, shot.name]);
-  const animationVariant = useMemo(() => {
-    if (!isVariationActive) return undefined;
-    return createShotVariant(variantId, shot.name || shot.id);
-  }, [isVariationActive, variantId, shot.id, shot.name]);
-
-  useEffect(() => {
-    setIsVariationActive(false);
-    setVariantId(0);
-    setReplayToken(0);
-  }, [shot.id]);
 
   useEffect(() => {
     loadReference();
@@ -224,16 +207,12 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
             <h2 className="text-2xl sm:text-3xl font-extrabold text-[#F5F5F5] tracking-tight">
               {shot.name}
             </h2>
-            {/* Coaching Intent */}
-            {(() => {
-              const tech = getShotTechnique(shot.name || shot.id);
-              return tech?.intent ? (
-                <div className="text-xs text-[#7FEA35] font-medium flex items-center gap-1.5 pt-0.5">
-                  <Compass className="w-3.5 h-3.5 shrink-0" />
-                  <span>Intent: {tech.intent}</span>
-                </div>
-              ) : null;
-            })()}
+            {shot.technique_notes && (
+              <div className="text-xs text-[#7FEA35] font-medium flex items-center gap-1.5 pt-0.5">
+                <Compass className="w-3.5 h-3.5 shrink-0" />
+                <span>Intent: {shot.technique_notes}</span>
+              </div>
+            )}
             {refDetail && (
               <p className="text-xs text-[#A5A9AD] flex items-center space-x-2">
                 <span className="text-[#F5F5F5] font-semibold">{refDetail.player_name}</span>
@@ -272,178 +251,94 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
         </div>
 
-        {/* Preview Mode Selector: 3D Reference Model vs Authentic Video */}
-        <div className="flex flex-wrap items-center justify-between border-b border-[#303438] pb-3 gap-2">
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setPreviewMode('3d')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                previewMode === '3d'
-                  ? 'bg-[#7FEA35] text-black shadow-md'
-                  : 'bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] border border-[#303438]'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Reference Technique Model</span>
-            </button>
-            <button
-              onClick={() => setPreviewMode('video')}
-              className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all flex items-center space-x-1.5 cursor-pointer ${
-                previewMode === 'video'
-                  ? 'bg-[#7FEA35] text-black shadow-md'
-                  : 'bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] border border-[#303438]'
-              }`}
-            >
-              <Video className="w-3.5 h-3.5" />
-              <span>Authentic Video Footage</span>
-            </button>
-          </div>
-          <span className="text-[11px] font-mono text-[#A5A9AD] hidden md:inline">
-            {previewMode === '3d'
-              ? '3D Reference Technique Model on interactive pitch'
-              : 'Masterclass benchmark footage'}
-          </span>
-        </div>
-
-        <div className="flex flex-wrap items-center justify-between gap-3 -mt-3">
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setIsVariationActive(false)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                !isVariationActive
-                  ? 'bg-[#7FEA35] text-black font-bold shadow-sm'
-                  : 'bg-[#111315] border border-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D]'
-              }`}
-            >
-              Original Motion
-            </button>
-            <button
-              onClick={() => {
-                if (!isVariationActive) {
-                  setIsVariationActive(true);
-                } else {
-                  setVariantId((prev) => nextShotVariant(prev, shot.name || shot.id).id);
-                }
-              }}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold flex items-center gap-1.5 transition-all cursor-pointer ${
-                isVariationActive
-                  ? 'bg-[#7FEA35] text-black font-bold shadow-sm'
-                  : 'bg-[#111315] border border-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] hover:bg-[#181B1D]'
-              }`}
-            >
-              <Shuffle className="w-3.5 h-3.5" />
-              {isVariationActive ? `Variation ${((variantId % 3) + 3) % 3 + 1} of 3` : 'Enable Variations'}
-            </button>
-          </div>
-
-          <div className="flex items-center gap-2">
-            <span className="text-[11px] text-[#A5A9AD] font-mono">
-              {!isVariationActive
-                ? `Authored ${shot.name} textbook technique`
-                : `Natural human spread · Variation ${((variantId % 3) + 3) % 3 + 1} of 3`}
+        {/* Authentic Video Player Section */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between pb-1">
+            <span className="text-xs font-mono font-bold text-[#7FEA35] flex items-center space-x-1.5">
+              <Video className="w-4 h-4" />
+              <span>Authentic Masterclass Footage</span>
             </span>
-            <button
-              onClick={() => setReplayToken((n) => n + 1)}
-              className="px-3 py-1.5 rounded-lg border border-[#303438] bg-[#111315] text-[#F5F5F5] text-xs font-semibold flex items-center gap-1.5 hover:bg-[#181B1D] cursor-pointer"
-            >
-              <RotateCcw className="w-3.5 h-3.5" /> Replay
-            </button>
+            <span className="text-[11px] font-mono text-[#A5A9AD]">
+              Masterclass benchmark footage
+            </span>
           </div>
-        </div>
 
-        {/* Main Visualizer / Video Player Section */}
-        {previewMode === '3d' ? (
-          <Batter3DCanvas
-            shotName={shot.name}
-            variant={animationVariant}
-            replayToken={replayToken}
-            tempoScale={animationVariant ? animationVariant.tempo : 1.0}
-            height={390}
-            showTrail={true}
-            showControls={true}
-            showPhaseScrubber={true}
-            showCameraPresets={true}
-            autoOrbitDefault={false}
-          />
-        ) : (
-          <div className="space-y-3">
-            <div className="relative rounded-2xl overflow-hidden bg-[#0A0C0E] border border-[#303438] aspect-video max-h-[380px] w-full flex items-center justify-center">
-              {videoSource ? (
-                <video
-                  ref={videoRef}
-                  src={videoSource}
-                  loop
-                  autoPlay
-                  muted
-                  playsInline
-                  className="w-full h-full object-contain"
-                  onPlay={() => setIsPlaying(true)}
-                  onPause={() => setIsPlaying(false)}
-                />
-              ) : (
-                <div className="text-center p-8 space-y-3">
-                  <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
-                  <h4 className="text-sm font-bold text-[#F5F5F5]">No Authentic Footage Available</h4>
-                  <p className="text-xs text-[#A5A9AD] max-w-md">
-                    CricketIQ refuses to show generic substitute videos for unrelated shots. You can upload an authorized reference video below.
-                  </p>
+          <div className="relative rounded-2xl overflow-hidden bg-[#0A0C0E] border border-[#303438] aspect-video max-h-[380px] w-full flex items-center justify-center">
+            {videoSource ? (
+              <video
+                ref={videoRef}
+                src={videoSource}
+                loop
+                autoPlay
+                muted
+                playsInline
+                className="w-full h-full object-contain"
+                onPlay={() => setIsPlaying(true)}
+                onPause={() => setIsPlaying(false)}
+              />
+            ) : (
+              <div className="text-center p-8 space-y-3">
+                <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
+                <h4 className="text-sm font-bold text-[#F5F5F5]">No Authentic Footage Available</h4>
+                <p className="text-xs text-[#A5A9AD] max-w-md">
+                  CricketIQ refuses to show generic substitute videos for unrelated shots. You can upload an authorized reference video below.
+                </p>
+                <button
+                  onClick={() => setShowUploadModal(true)}
+                  className="px-4 py-2 rounded-xl bg-[#7FEA35] text-black text-xs font-bold hover:bg-[#94EE58] cursor-pointer"
+                >
+                  Upload Reference Video
+                </button>
+              </div>
+            )}
+
+            {/* Video Controls Overlay */}
+            {videoSource && (
+              <div className="absolute bottom-3 left-3 right-3 bg-[#0B0D0F]/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-[#303438] flex items-center justify-between text-xs text-[#F5F5F5]">
+                <div className="flex items-center space-x-3">
                   <button
-                    onClick={() => setShowUploadModal(true)}
-                    className="px-4 py-2 rounded-xl bg-[#7FEA35] text-black text-xs font-bold hover:bg-[#94EE58] cursor-pointer"
+                    onClick={togglePlay}
+                    className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#7FEA35] transition-colors cursor-pointer"
+                    title={isPlaying ? 'Pause' : 'Play'}
                   >
-                    Upload Reference Video
+                    {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-[#7FEA35]" />}
                   </button>
+                  <button
+                    onClick={handleRestart}
+                    className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] transition-colors cursor-pointer"
+                    title="Replay"
+                  >
+                    <RotateCcw className="w-4 h-4" />
+                  </button>
+                  <span className="text-[11px] font-mono text-[#A5A9AD]">
+                    {refDetail?.player_name || 'Master Class'}
+                  </span>
                 </div>
-              )}
 
-              {/* Video Controls Overlay */}
-              {videoSource && (
-                <div className="absolute bottom-3 left-3 right-3 bg-[#0B0D0F]/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-[#303438] flex items-center justify-between text-xs text-[#F5F5F5]">
-                  <div className="flex items-center space-x-3">
+                <div className="flex items-center space-x-2">
+                  <span className="text-[11px] text-[#A5A9AD] font-mono">Speed:</span>
+                  {[0.5, 0.75, 1.0].map((spd) => (
                     <button
-                      onClick={togglePlay}
-                      className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#7FEA35] transition-colors cursor-pointer"
-                      title={isPlaying ? 'Pause' : 'Play'}
+                      key={spd}
+                      onClick={() => setSpeed(spd)}
+                      className={`px-2 py-1 rounded text-[11px] font-mono font-semibold cursor-pointer transition-all ${
+                        playbackSpeed === spd
+                          ? 'bg-[#7FEA35] text-black'
+                          : 'bg-[#181B1D] text-[#A5A9AD] hover:text-[#F5F5F5]'
+                      }`}
                     >
-                      {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-[#7FEA35]" />}
+                      {spd}x
                     </button>
-                    <button
-                      onClick={handleRestart}
-                      className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] transition-colors cursor-pointer"
-                      title="Replay"
-                    >
-                      <RotateCcw className="w-4 h-4" />
-                    </button>
-                    <span className="text-[11px] font-mono text-[#A5A9AD]">
-                      {refDetail?.player_name || 'Master Class'}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-2">
-                    <span className="text-[11px] text-[#A5A9AD] font-mono">Speed:</span>
-                    {[0.5, 0.75, 1.0].map((spd) => (
-                      <button
-                        key={spd}
-                        onClick={() => setSpeed(spd)}
-                        className={`px-2 py-1 rounded text-[11px] font-mono font-semibold cursor-pointer transition-all ${
-                          playbackSpeed === spd
-                            ? 'bg-[#7FEA35] text-black'
-                            : 'bg-[#181B1D] text-[#A5A9AD] hover:text-[#F5F5F5]'
-                        }`}
-                      >
-                        {spd}x
-                      </button>
-                    ))}
-                  </div>
+                  ))}
                 </div>
-              )}
-            </div>
-
-            <p className="text-xs text-[#A5A9AD] leading-relaxed">
-              {refDetail?.description || shot.description}
-            </p>
+              </div>
+            )}
           </div>
-        )}
+
+          <p className="text-xs text-[#A5A9AD] leading-relaxed">
+            {refDetail?.description || shot.description}
+          </p>
+        </div>
 
         {/* 7-Phase Movement Breakdown Timeline */}
         <div className="space-y-3 pt-2 border-t border-[#303438]">

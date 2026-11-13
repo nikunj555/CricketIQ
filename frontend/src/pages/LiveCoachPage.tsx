@@ -28,8 +28,6 @@ import {
 } from 'lucide-react';
 import { api } from '../services/api';
 import { LivePoseState, LiveAttemptFeedback, CricketShot, AnalysisResult, NavTab } from '../types/cricket';
-import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
-import { getShotTechnique } from '../data/shotTechnique';
 
 interface LiveCoachPageProps {
   onSelectTab: (tab: NavTab) => void;
@@ -59,7 +57,6 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
   const [handedness, setHandedness] = useState<string>('Right');
   const [targetShot, setTargetShot] = useState<string>(initialTargetShot || 'Cover Drive');
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
-  const [showReferenceCoach, setShowReferenceCoach] = useState<boolean>(true);
 
   // Recording State Machine (Idle -> Countdown -> Recording -> Reviewing -> Analyzing)
   const [recordingState, setRecordingState] = useState<'idle' | 'countdown' | 'recording' | 'reviewing' | 'analyzing'>('idle');
@@ -896,20 +893,6 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
             )}
           </select>
 
-          {/* Reference Coach Avatar Toggle */}
-          <button
-            onClick={() => setShowReferenceCoach((prev) => !prev)}
-            className={`px-2.5 py-1.5 rounded-lg border text-xs font-semibold flex items-center space-x-1.5 transition-all cursor-pointer ${
-              showReferenceCoach
-                ? 'bg-[#7FEA35]/15 border-[#7FEA35] text-[#7FEA35]'
-                : 'bg-[#111315] hover:bg-[#181B1D] text-[#A5A9AD] border-[#303438]'
-            }`}
-            title="Toggle Realistic Reference Avatar Split-Screen"
-          >
-            <Eye className="w-3.5 h-3.5" />
-            <span>{showReferenceCoach ? 'Reference Coach: On' : 'Reference Coach: Off'}</span>
-          </button>
-
           {/* Camera Selector Dropdown */}
           {availableDevices.length > 1 && (
             <select
@@ -1012,10 +995,10 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
         </div>
       </div>
 
-      {/* Main View: Viewfinder / Review Player Split with Reference Avatar */}
-      <div className={`grid grid-cols-1 ${showReferenceCoach ? 'xl:grid-cols-12' : 'lg:grid-cols-3'} gap-6`}>
+      {/* Main View: Viewfinder / Review Player Split with Coaching Feedback */}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
         {/* Left Section: Live Camera or Recorded Video Player */}
-        <div className={`${showReferenceCoach ? 'xl:col-span-8' : 'lg:col-span-2'} space-y-3`}>
+        <div className="lg:col-span-2 space-y-3">
           <div className="relative rounded-2xl overflow-hidden bg-black border-2 border-[#303438] aspect-[4/3] sm:aspect-video shadow-2xl flex items-center justify-center group">
             {/* If in Review State: Display Real Recorded Video Playback */}
             {recordingState === 'reviewing' && recordedVideoUrl ? (
@@ -1291,41 +1274,8 @@ export const LiveCoachPage: React.FC<LiveCoachPageProps> = ({
           </div>
         </div>
 
-        {/* Right Section / Split View: Reference Coach Avatar & Technique Feedback */}
-        <div className={`${showReferenceCoach ? 'xl:col-span-4' : 'lg:col-span-1'} space-y-4`}>
-          {/* Reference Coach Avatar Widget */}
-          {showReferenceCoach && (
-            <div className="rounded-2xl overflow-hidden border border-[#303438] bg-[#0A0C0E] shadow-xl">
-              <div className="px-4 py-2.5 bg-[#111315] border-b border-[#303438] flex items-center justify-between">
-                <div className="flex items-center space-x-2">
-                  <span className="w-2.5 h-2.5 rounded-full bg-[#7FEA35] shadow-sm shadow-[#7FEA35]/50" />
-                  <span className="text-xs font-bold uppercase tracking-wider text-[#F5F5F5]">
-                    Reference Form: {targetShot}
-                  </span>
-                </div>
-              </div>
-              {/* Technique Coaching Intent */}
-              {(() => {
-                const tech = getShotTechnique(targetShot);
-                return tech?.intent ? (
-                  <div className="px-3 py-1.5 bg-[#181B1D] border-b border-[#303438] text-[11px] text-[#7FEA35] flex items-center gap-1.5">
-                    <span className="font-bold uppercase tracking-wider text-[9px] bg-[#7FEA35]/15 px-1.5 py-0.5 rounded text-[#7FEA35]">Intent</span>
-                    <span className="text-[#F5F5F5] truncate">{tech.intent}</span>
-                  </div>
-                ) : null;
-              })()}
-              <Batter3DCanvas
-                shotName={targetShot}
-                height={320}
-                showTrail={true}
-                showControls={true}
-                showPhaseScrubber={false}
-                showCameraPresets={true}
-                autoOrbitDefault={false}
-              />
-            </div>
-          )}
-
+        {/* Right Section: Technique Feedback */}
+        <div className="lg:col-span-1 space-y-4">
           {/* Post-Shot Feedback Card */}
           {currentFeedback ? (
             <div className="bg-[#111315] border-2 border-[#7FEA35]/60 rounded-2xl p-5 space-y-4 shadow-xl relative overflow-hidden animate-in fade-in zoom-in-95 duration-200">

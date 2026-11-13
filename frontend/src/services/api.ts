@@ -43,39 +43,61 @@ function resolveApiBase(): string {
 
 const API_BASE = resolveApiBase();
 
-async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
+async function delay(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function apiFetch(input: string, init?: RequestInit, retries: number = 2): Promise<Response> {
   const isHealthCheck = typeof input === 'string' && input.includes('/health');
   const isUpload =
     typeof input === 'string' &&
     (input.includes('/video/upload') || input.includes('/inspect-strikers'));
-  const timeoutMs = isHealthCheck ? 8000 : (isUpload ? 180000 : 45000);
+  const timeoutMs = isHealthCheck ? 10000 : (isUpload ? 300000 : 45000);
 
-  const controller = new AbortController();
-  const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+  let lastError: unknown;
 
-  try {
-    const fetchInit: RequestInit = {
-      ...init,
-      signal: init?.signal || controller.signal,
-    };
-    return await fetch(input, fetchInit);
-  } catch (err: unknown) {
-    const errorObj = err as { name?: string; message?: string };
-    if (
-      errorObj?.name === 'AbortError' ||
-      errorObj?.name === 'TypeError' ||
-      errorObj?.message?.includes('Failed to fetch') ||
-      errorObj?.message?.includes('NetworkError') ||
-      errorObj?.message?.includes('aborted')
-    ) {
-      throw new Error(
-        'Backend server unreachable or timing out. Please check server connectivity.'
-      );
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
+
+    try {
+      const fetchInit: RequestInit = {
+        ...init,
+        signal: init?.signal || controller.signal,
+      };
+      const response = await fetch(input, fetchInit);
+      clearTimeout(timeoutId);
+      return response;
+    } catch (err: unknown) {
+      clearTimeout(timeoutId);
+      lastError = err;
+      const errorObj = err as { name?: string; message?: string };
+      const isNetworkError =
+        errorObj?.name === 'TypeError' ||
+        errorObj?.message?.includes('Failed to fetch') ||
+        errorObj?.message?.includes('NetworkError');
+
+      // Only retry network errors if attempts remaining and not an intentional abort
+      if (isNetworkError && attempt < retries && errorObj?.name !== 'AbortError') {
+        await delay(500 * (attempt + 1));
+        continue;
+      }
+
+      if (errorObj?.name === 'AbortError') {
+        throw new Error(
+          `Request timed out after ${Math.round(timeoutMs / 1000)}s waiting for backend response.`
+        );
+      }
+      if (isNetworkError) {
+        throw new Error(
+          `Backend server is unreachable at ${API_BASE}. Please verify that the backend is running.`
+        );
+      }
+      throw err;
     }
-    throw err;
-  } finally {
-    clearTimeout(timeoutId);
   }
+
+  throw lastError;
 }
 
 export const api = {
@@ -93,7 +115,8 @@ export const api = {
       return new Promise((resolve, reject) => {
         const xhr = new XMLHttpRequest();
         xhr.open('POST', `${API_BASE}/video/upload`);
-        xhr.timeout = 180000;
+        // 0 = no arbitrary timeout abort on upload stream; background processing runs asynchronously
+        xhr.timeout = 0;
 
         if (xhr.upload && onProgress) {
           xhr.upload.onprogress = (event) => {
@@ -144,11 +167,11 @@ export const api = {
         };
 
         xhr.onerror = () => {
-          reject(new Error('Backend server unreachable or timing out. Please check server connectivity.'));
+          reject(new Error('Backend server unreachable. Please verify the backend is running at http://127.0.0.1:8000.'));
         };
 
         xhr.ontimeout = () => {
-          reject(new Error('Video upload timed out. Please check your network connection and retry.'));
+          reject(new Error('Video upload timed out. Connection to backend was lost or too slow.'));
         };
 
         xhr.send(formData);

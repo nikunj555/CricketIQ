@@ -15,7 +15,6 @@ import {
 } from 'lucide-react';
 import { BatterSkeleton3D } from './BatterSkeleton3D';
 import { PitchEnvironment3D } from './PitchEnvironment3D';
-import { RealisticBatterVisualizer } from '../RealisticBatterVisualizer';
 import { useMotionSettings } from '../../context/MotionContext';
 import { ShotVariant } from '../../data/shotVariants';
 
@@ -127,18 +126,14 @@ export const Batter3DCanvas: React.FC<Batter3DCanvasProps> = ({
     onPhaseChange?.(phaseKey);
   };
 
-  // Graceful WebGL Fallback to 2D Canvas Avatar
+  // WebGL Fallback
   if (!hasWebGL) {
     return (
-      <div className={`relative bg-[#050505] rounded-2xl border border-[#303438] overflow-hidden ${className}`} style={{ height }}>
-        <div className="absolute top-3 left-3 z-10 px-2.5 py-1 rounded-md bg-[#181B1D]/90 border border-[#303438] text-[10px] font-mono text-amber-400">
-          WebGL Disabled · 2D Fallback Mode
+      <div className={`relative bg-[#050505] rounded-2xl border border-[#303438] flex items-center justify-center p-6 ${className}`} style={{ height }}>
+        <div className="text-center space-y-2">
+          <p className="text-sm font-semibold text-slate-300">3D Acceleration Unavailable</p>
+          <p className="text-xs text-slate-500">WebGL is disabled or unsupported on this display device.</p>
         </div>
-        <RealisticBatterVisualizer
-          shotName={shotName}
-          handedness={isLeftHanded ? 'Left' : 'Right'}
-          initialPhaseIndex={selectedPhase ? PHASES.findIndex((p) => p.key === selectedPhase) : 4}
-        />
       </div>
     );
   }

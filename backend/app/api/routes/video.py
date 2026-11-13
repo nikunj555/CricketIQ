@@ -1,6 +1,8 @@
 import uuid
 import shutil
 import base64
+import sqlite3
+import logging
 import cv2
 from pathlib import Path
 from typing import Optional, List, Dict, Any
@@ -11,6 +13,8 @@ from backend.app.schemas.analysis import VideoUploadResponse, VideoProcessingSta
 from backend.app.repositories.session_repository import session_repo
 from backend.app.services.video_service import video_service
 from backend.app.services.pose_service import pose_service
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/video", tags=["Video"])
 
@@ -173,7 +177,8 @@ def get_processing_status(session_id: str):
         status=session["status"],
         progress=session["progress"],
         current_step=session["current_step"],
-        error=session["error"]
+        error=session["error"],
+        result=session.get("result") if session.get("status") == "completed" else None
     )
 
 @router.post("/session/{session_id}/select-striker")

@@ -21,8 +21,6 @@ import {
 } from 'recharts';
 import { ComparisonResult, ReferenceShotMeta, SessionListItem, NavTab } from '../types/cricket';
 import { api } from '../services/api';
-import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
-import { getShotTechnique } from '../data/shotTechnique';
 
 interface ComparisonPageProps {
   sessionId: string | null;
@@ -316,40 +314,6 @@ export const ComparisonPage: React.FC<ComparisonPageProps> = ({ sessionId, onSel
             </div>
           </div>
 
-          {/* 3D Benchmark Ideal Ghost Telemetry Viewport */}
-          <div className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-3">
-            <div className="flex items-center justify-between border-b border-[#303438] pb-2">
-              <div className="flex items-center space-x-2">
-                <span className="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-pulse" />
-                <h3 className="text-xs font-mono uppercase tracking-wider text-cyan-300 font-bold">
-                  3D Ideal Benchmark Ghost ({comparison.shot_type})
-                </h3>
-              </div>
-              <span className="text-[11px] font-mono text-[#A5A9AD]">
-                Full Kinematics Forward Model
-              </span>
-            </div>
-            {/* Technique Coaching Intent */}
-            {(() => {
-              const tech = getShotTechnique(comparison.shot_type);
-              return tech?.intent ? (
-                <div className="px-3 py-2 rounded-xl bg-[#111315] border border-[#303438] text-xs text-[#7FEA35] flex items-center gap-2">
-                  <span className="font-bold uppercase tracking-wider text-[10px] bg-[#7FEA35]/15 px-2 py-0.5 rounded text-[#7FEA35]">Intent</span>
-                  <span className="text-[#F5F5F5]">{tech.intent}</span>
-                </div>
-              ) : null;
-            })()}
-            <Batter3DCanvas
-              shotName={comparison.shot_type}
-              isGhost={true}
-              ghostColor="#00f0ff"
-              height={320}
-              showControls={true}
-              showPhaseScrubber={true}
-              showCameraPresets={true}
-              autoOrbitDefault={false}
-            />
-          </div>
 
           {/* Overlaid Aligned Comparison Chart */}
           <div className="bg-navy-900/80 rounded-2xl border border-navy-800 p-6 space-y-4">

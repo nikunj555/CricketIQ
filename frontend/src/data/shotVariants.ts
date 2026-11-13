@@ -1,5 +1,4 @@
 import { getShotAnimation, ShotAnimationDefinition } from './shotAnimations';
-import type { ReferenceShotDefinition } from '../components/RealisticBatterVisualizer';
 
 export interface ShotVariant {
   id: number;
@@ -85,22 +84,5 @@ export function varyShotAnimation(animation: ShotAnimationDefinition, variant: S
     }];
   }));
   return { ...animation, phases };
-}
-
-export function varyReferenceShot(definition: ReferenceShotDefinition, variant: ShotVariant): ReferenceShotDefinition {
-  const direction = variant.seed % 2 ? 1 : -1;
-  const phases = Object.fromEntries(Object.entries(definition.phases).map(([key, item]) => {
-    const pose = item.keyframe_pose;
-    const swing = ['downswing', 'impact', 'follow_through'].includes(key);
-    return [key, { ...item, keyframe_pose: {
-      ...pose,
-      lead_stride_x: pose.lead_stride_x * (key === 'stride' ? variant.strideScale : 1),
-      head_offset_x: pose.head_offset_x + (swing ? direction * 0.008 : 0),
-      torso_lean: pose.torso_lean + (swing ? variant.leanOffset : 0),
-      bat_tip_x: pose.bat_tip_x * (key === 'follow_through' ? variant.followThroughScale : 1),
-      duration_weight: pose.duration_weight / variant.tempo,
-    } }];
-  }));
-  return { ...definition, phases };
 }
 

@@ -210,3 +210,4 @@ class VideoProcessingStatus(BaseModel):
     progress: float  # 0 to 100
     current_step: str
     error: Optional[str] = None
+    result: Optional[Dict[str, Any]] = None

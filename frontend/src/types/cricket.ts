@@ -373,6 +373,7 @@ export interface VideoProcessingStatus {
   progress: number;
   current_step: string;
   error?: string | null;
+  result?: AnalysisResult | null;
 }
 
 export interface KeyMomentDifference {

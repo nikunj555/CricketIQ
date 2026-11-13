@@ -26,8 +26,6 @@ import { api } from '../services/api';
 import { MetricCard } from '../components/MetricCard';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { CoachingFeedbackList } from '../components/CoachingFeedbackList';
-import { getPoseForShotAndPhase } from '../components/RealisticBatterVisualizer';
-import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface WorkspacePageProps {
   sessionId: string | null;
@@ -66,10 +64,8 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
   const [showSkeletonOverlay, setShowSkeletonOverlay] = useState<boolean>(true);
   const [showAngles, setShowAngles] = useState<boolean>(true);
   const [originalOnly, setOriginalOnly] = useState<boolean>(false);
-  const [showIdealGhost, setShowIdealGhost] = useState<boolean>(false);
   const [viewMode, setViewMode] = useState<'single' | 'synced'>('single');
   const [singleSource, setSingleSource] = useState<'original' | 'annotated'>('original');
-  const [show3DComparison, setShow3DComparison] = useState<boolean>(false);
   const [activeMistakeJoint, setActiveMistakeJoint] = useState<string | null>(null);
   const [hasEnded, setHasEnded] = useState<boolean>(false);
   const [isSwitchingStriker, setIsSwitchingStriker] = useState<boolean>(false);
@@ -493,54 +489,8 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
       ctx.fillText('⚡ IMPACT FRAME', offsetX + 20, offsetY + 29);
     }
 
-    if (showIdealGhost && isImpact) {
-      try {
-        const idealPose = getPoseForShotAndPhase(analysis.shot_type, 4, 'side', analysis.handedness as any);
-        if (idealPose) {
-          const hipL = lms[23];
-          const hipR = lms[24];
-          const batterHipX = hipL && hipR ? (toX(hipL.x) + toX(hipR.x)) / 2 : cw / 2;
-          const batterHipY = hipL && hipR ? (toY(hipL.y) + toY(hipR.y)) / 2 : ch / 2;
-          const scale = renderH * 0.45;
-
-          const gToX = (pt: [number, number]) => batterHipX + pt[0] * scale;
-          const gToY = (pt: [number, number]) => batterHipY + pt[1] * scale;
-
-          ctx.save();
-          ctx.setLineDash([5, 4]);
-          ctx.lineWidth = 2.5;
-          ctx.strokeStyle = 'rgba(56, 189, 248, 0.75)';
-
-          const ghostConnections: [ [number, number], [number, number] ][] = [
-            [idealPose.chest, idealPose.neck],
-            [idealPose.neck, idealPose.head],
-            [idealPose.leadShoulder, idealPose.leadElbow],
-            [idealPose.leadElbow, idealPose.leadWrist],
-            [idealPose.rearShoulder, idealPose.rearElbow],
-            [idealPose.rearElbow, idealPose.rearWrist],
-            [idealPose.leadHip, idealPose.leadKnee],
-            [idealPose.leadKnee, idealPose.leadAnkle],
-            [idealPose.rearHip, idealPose.rearKnee],
-            [idealPose.rearKnee, idealPose.rearAnkle],
-            [idealPose.batHandle, idealPose.batTip]
-          ];
-
-          ghostConnections.forEach(([p1, p2]) => {
-            ctx.beginPath();
-            ctx.moveTo(gToX(p1), gToY(p1));
-            ctx.lineTo(gToX(p2), gToY(p2));
-            ctx.stroke();
-          });
-
-          ctx.restore();
-        }
-      } catch (e) {
-        // Fallback
-      }
-    }
-
     ctx.restore();
-  }, [analysis, findFrameIndex, getMetricVerdict, showSkeletonOverlay, showAngles, originalOnly, showIdealGhost, singleSource]);
+  }, [analysis, findFrameIndex, getMetricVerdict, showSkeletonOverlay, showAngles, originalOnly, singleSource]);
 
   // Video Frame Loop driven by requestVideoFrameCallback
   useEffect(() => {
@@ -1285,19 +1235,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
               </p>
             </div>
           </div>
-          <div className="flex items-center space-x-2">
-            <button
-              onClick={() => setShow3DComparison(!show3DComparison)}
-              className={`px-3 py-1.5 rounded-lg text-xs font-semibold border transition-all cursor-pointer flex items-center space-x-1.5 ${
-                show3DComparison
-                  ? 'bg-[#7FEA35] text-[#050505] border-[#7FEA35] font-bold'
-                  : 'bg-[#181B1D] text-[#F5F5F5] border-[#303438] hover:bg-[#303438]'
-              }`}
-            >
-              <Eye className="w-3.5 h-3.5" />
-              <span>{show3DComparison ? 'Hide Reference Technique Model' : 'Compare with Reference Model'}</span>
-            </button>
-          </div>
         </div>
 
         {/* Top 3 Mistakes Cards */}
@@ -1320,7 +1257,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                         handleSeekFrame(m.frame_index);
                       }
                       setActiveMistakeJoint(detectedJoint);
-                      setShow3DComparison(true);
                     }}
                     className={`rounded-xl border p-3.5 space-y-2 flex flex-col justify-between cursor-pointer transition-all ${
                       isSelectedFault
@@ -1376,57 +1312,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
         )}
       </div>
 
-      {/* Side-by-Side 3D Model Comparison View when enabled */}
-      {show3DComparison && (
-        <div className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-3 animate-in fade-in duration-150">
-          <div className="flex flex-wrap items-center justify-between pb-2 border-b border-[#303438] gap-2">
-            <h3 className="text-xs font-mono uppercase tracking-wider text-[#7FEA35] font-bold flex items-center space-x-2">
-              <Sparkles className="w-4 h-4" />
-              <span>Side-by-Side Technique Comparison: Player vs Ideal Benchmark Ghost</span>
-            </h3>
-            <div className="flex items-center space-x-2">
-              <span className="text-xs font-mono text-[#A5A9AD] mr-2">
-                Phase: <strong className="text-white">{currentPhase}</strong>
-              </span>
-            </div>
-          </div>
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <div className="text-xs font-mono text-[#A5A9AD] font-bold">1. Player Pose & Skeleton (Frame {currentFrame})</div>
-              <div className="rounded-xl overflow-hidden border border-[#303438] aspect-video bg-black flex items-center justify-center">
-                <img
-                  src={api.getVideoUrl(analysis.thumbnail_path)}
-                  alt="Player skeleton"
-                  className="w-full h-full object-contain"
-                />
-              </div>
-            </div>
-            <div className="space-y-1.5">
-              <div className="text-xs font-mono text-[#7FEA35] font-bold">
-                2. Ideal Benchmark ({analysis.shot_type})
-                {activeMistakeJoint && (
-                  <span className="ml-2 text-rose-400 font-normal">
-                    · Joint cue: {activeMistakeJoint}
-                  </span>
-                )}
-              </div>
-              <div className="rounded-xl overflow-hidden border border-[#303438] aspect-video bg-[#0d0f11]">
-                <Batter3DCanvas
-                  shotName={analysis.shot_type}
-                  isGhost={true}
-                  ghostColor="#00f0ff"
-                  highlightJoint={activeMistakeJoint}
-                  showControls={false}
-                  showPhaseScrubber={false}
-                  showCameraPresets={true}
-                  autoOrbitDefault={false}
-                  height="100%"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
 
       {/* Metric Comparison Table */}
       {analysis.metric_comparison_table && analysis.metric_comparison_table.length > 0 && (
@@ -1565,7 +1450,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                   if (!originalOnly) {
                     setShowSkeletonOverlay(false);
                     setShowAngles(false);
-                    setShowIdealGhost(false);
                   } else {
                     setShowSkeletonOverlay(true);
                     setShowAngles(true);
@@ -1605,19 +1489,6 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                     title="Toggle Joint Angle Arcs & Readings"
                   >
                     Angles: {showAngles ? 'ON' : 'OFF'}
-                  </button>
-
-                  <button
-                    onClick={() => setShowIdealGhost(!showIdealGhost)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer flex items-center space-x-1 ${
-                      showIdealGhost
-                        ? 'bg-purple-500/20 text-purple-300 border-purple-500/40 font-bold'
-                        : 'bg-[#181B1D] text-[#A5A9AD] border-[#303438] hover:text-white'
-                    }`}
-                    title="Show Ideal Reference Pose Wireframe Ghost at Impact"
-                  >
-                    <Sparkles className="w-3 h-3" />
-                    <span>Ghost Pose</span>
                   </button>
                 </>
               )}
