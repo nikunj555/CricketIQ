@@ -41,8 +41,8 @@ class ReferenceService:
             self._alias_map["front foot defensive"] = "Forward Defensive"
 
             logger.info(f"Loaded {len(self._data)} shots from {self.data_path}")
-        except Exception as e:
-            logger.error(f"Failed to load reference shots from {self.data_path}: {e}")
+        except (json.JSONDecodeError, OSError, KeyError, ValueError) as e:
+            logger.exception(f"Failed to load reference shots from {self.data_path}: {e}")
 
     def canonicalize_shot_name(self, shot_name_or_slug: str) -> str:
         """Resolve any shot name, slug, or alias to canonical catalogue name."""

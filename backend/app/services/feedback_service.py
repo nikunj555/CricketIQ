@@ -283,7 +283,12 @@ class FeedbackService:
                     shot_errors, shot_drills, drill_primary, drill_secondary
                 )
 
-                provenance = "MEASURED" if frame.get("confidence", 0.0) >= 0.60 else "ESTIMATED"
+                if frame.get("is_interpolated") or frame.get("phase_source") == "bilstm":
+                    provenance = "MODEL_INFERRED"
+                elif frame.get("confidence", 0.0) >= 0.60:
+                    provenance = "MEASURED"
+                else:
+                    provenance = "ESTIMATED"
 
                 candidate_mistakes.append({
                     "id": f"mistake_{phase_name}_{metric_key}",
@@ -496,6 +501,8 @@ class FeedbackService:
                     validity = "UNAVAILABLE"
                 elif camera_view == "oblique" and "knee" in metric_key:
                     validity = "ESTIMATED"
+                elif frame and (frame.get("is_interpolated") or frame.get("phase_source") == "bilstm"):
+                    validity = "MODEL_INFERRED"
 
                 measured_val = None
                 if frame:

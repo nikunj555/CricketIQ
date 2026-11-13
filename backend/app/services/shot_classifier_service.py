@@ -72,7 +72,7 @@ class ShotClassifierService:
                 if "classes" in data:
                     self.classes = data["classes"]
                 logger.info(f"Loaded trained shot classifier from {model_path}")
-            except Exception as e:
+            except (OSError, ValueError, KeyError, EOFError) as e:
                 logger.warning(f"Could not load shot_classifier.joblib: {e}")
 
     def extract_features(

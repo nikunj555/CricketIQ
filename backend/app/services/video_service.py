@@ -168,7 +168,7 @@ class VideoService:
                         groundtruth_data = loaded_gt["frames"]
                     if groundtruth_data:
                         logger.info(f"Loaded {len(groundtruth_data)} ground-truth frames for {input_path.name}")
-                except Exception as e:
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                     logger.warning(f"Failed to load groundtruth file {gt_file.name}: {e}")
 
             # Fail fast if server AI engine failed to load (e.g. missing Linux OpenGL/libGLESv2)
@@ -296,7 +296,8 @@ class VideoService:
                         striker_select_method = "user_tap_coords"
                     else:
                         active_striker_id = best_tid
-                except Exception:
+                except (ValueError, KeyError, TypeError, IndexError) as tap_err:
+                    logger.warning(f"Failed to parse striker tap coords: {tap_err}")
                     active_striker_id = best_tid
             else:
                 active_striker_id = best_tid
@@ -856,10 +857,16 @@ class VideoService:
             )
             logger.info(f"Session {session_id} processed successfully.")
 
+        except (cv2.error, sqlite3.Error, FileNotFoundError, ValueError, RuntimeError, OSError) as e:
+            if 'cap' in locals() and cap is not None and cap.isOpened():
+                cap.release()
+            logger.exception(f"Service error processing session {session_id}: {e}")
+            session_repo.update_progress(session_id, "failed", 0.0, "Processing failure", f"{type(e).__name__}: {str(e)}")
+
         except Exception as e:
             if 'cap' in locals() and cap is not None and cap.isOpened():
                 cap.release()
-            logger.exception(f"Error processing session {session_id}: {e}")
+            logger.exception(f"Unexpected error processing session {session_id}: {e}")
             session_repo.update_progress(session_id, "failed", 0.0, "Processing failure", str(e))
 
     def reanalyze_shot(self, session_id: str, new_shot: str, lang: str = "en") -> Optional[Dict[str, Any]]:
@@ -929,7 +936,7 @@ class VideoService:
                 logger.info(f"Successfully transcoded {video_path.name} to standard browser H.264")
             elif temp_out.exists():
                 temp_out.unlink()
-        except Exception as e:
+        except (subprocess.SubprocessError, subprocess.TimeoutExpired, FileNotFoundError, OSError) as e:
             logger.warning(f"Could not transcode {video_path} to H.264: {e}")
 
     def override_striker(self, session_id: str, track_id: int):

@@ -73,8 +73,8 @@ class PhaseService:
         try:
             torch.set_num_threads(1)
             torch.set_num_interop_threads(1)
-        except Exception:
-            pass
+        except (RuntimeError, ValueError, AttributeError) as th_err:
+            logger.debug(f"Could not configure torch threads: {th_err}")
         self._load_model()
 
     def _load_model(self):
@@ -91,7 +91,7 @@ class PhaseService:
                 model.eval()
                 self.model = model
                 logger.info(f"Loaded trained BiLSTM phase model from {self.model_path}")
-            except Exception as e:
+            except (torch.jit.Error, RuntimeError, FileNotFoundError, OSError, KeyError, ValueError) as e:
                 logger.warning(f"Could not load phase model weights: {e}. Using kinematic phase detector.")
                 self.model = None
         else:

@@ -672,7 +672,8 @@ class GeometryService:
         if _SCIPY_AVAILABLE and len(arr) >= w:
             try:
                 smoothed = savgol_filter(arr, window_length=w, polyorder=2)
-            except Exception:
+            except (ValueError, TypeError) as sg_err:
+                logger.debug(f"savgol_filter fallback to moving average: {sg_err}")
                 smoothed = np.convolve(arr, np.ones(w) / w, mode="same")
         else:
             kernel = np.ones(w) / w

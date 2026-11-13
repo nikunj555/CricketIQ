@@ -26,7 +26,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [shotType, setShotType] = useState<string>(initialShotType || 'Cover Drive');
+  const [shotType, setShotType] = useState<string>(initialShotType || 'Auto-Detect');
   const [handedness, setHandedness] = useState<string>('Right');
   const [cameraAngle, setCameraAngle] = useState<string>('Side View');
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
@@ -74,24 +74,39 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     }
   };
 
+  const validateAndSetFile = (file: File): boolean => {
+    const validExtensions = ['.mp4', '.mov', '.avi', '.webm', '.mkv', '.m4v'];
+    const ext = '.' + (file.name.split('.').pop() || '').toLowerCase();
+    if (!validExtensions.includes(ext)) {
+      setError(`Unsupported video format "${ext}". Please upload a .mp4 or .mov video file (also accepts .webm, .avi, .mkv).`);
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      return false;
+    }
+    const maxSizeBytes = 150 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      setError(`File size (${(file.size / (1024 * 1024)).toFixed(1)}MB) exceeds the 150MB limit. Please upload a shorter clip.`);
+      setSelectedFile(null);
+      setPreviewUrl(null);
+      return false;
+    }
+    setSelectedFile(file);
+    setPreviewUrl(URL.createObjectURL(file));
+    setError(null);
+    checkStrikers(file);
+    return true;
+  };
+
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
-      const file = e.target.files[0];
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-      setError(null);
-      checkStrikers(file);
+      validateAndSetFile(e.target.files[0]);
     }
   };
 
   const handleDrop = (e: React.DragEvent<HTMLDivElement>) => {
     e.preventDefault();
     if (e.dataTransfer.files && e.dataTransfer.files[0]) {
-      const file = e.dataTransfer.files[0];
-      setSelectedFile(file);
-      setPreviewUrl(URL.createObjectURL(file));
-      setError(null);
-      checkStrikers(file);
+      validateAndSetFile(e.dataTransfer.files[0]);
     }
   };
 
@@ -148,7 +163,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
       formData.append('shot_type', shotType);
       formData.append('handedness', handedness);
       formData.append('camera_angle', cameraAngle);
-      if (selectedTrackId !== null) {
+      if (selectedTrackId !== null && selectedTrackId !== undefined && !isNaN(Number(selectedTrackId))) {
         formData.append('striker_track_id', selectedTrackId.toString());
       }
 

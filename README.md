@@ -21,7 +21,7 @@ CricketIQ is an end-to-end computer vision and explainable artificial intelligen
 1. **Mode A: Live Batting Coach (Real-Time):** A lightweight on-field practice companion that connects to any device camera via `getUserMedia`. Utilizing a 5-state finite state machine and kinetic velocity burst detection, it tracks the batsman's movement, detects when a stroke begins and ends, and presents an immediate, evidence-grounded post-shot feedback card (lead knee flexion, torso lean, head stability, target comparison, previous attempt delta, and next practice drill) with < 40ms processing latency so players can immediately practice the next shot.
 2. **Mode B: Detailed Video Analysis:** A deep-dive analytical suite for recorded footage featuring frame-synchronized skeleton overlays, Recharts kinematic time-series curves, 7-phase temporal segmentation using a custom PyTorch Bidirectional LSTM (BiLSTM), Dynamic Time Warping (DTW) trajectory alignment against textbook Marylebone Cricket Club (MCC) coaching standards, and longitudinal SQLite progress tracking.
 
-On held-out test data, our custom PyTorch BiLSTM achieves **98.69% accuracy** and **0.9837 macro F1**, an empirical gain of **+9.07%** over the static classification baseline. All measurements run locally on standard student hardware without cloud GPU or paid API dependencies.
+On held-out synthetic test sequences (synthetic benchmark), our custom PyTorch BiLSTM achieves **98.69% accuracy** and **0.9837 macro F1**, an empirical gain of **+9.07%** over the static classification baseline. All measurements run locally on standard student hardware without cloud GPU or paid API dependencies.
 
 ---
 
@@ -214,7 +214,9 @@ Evaluated on the held-out test split (21 sequences, 1,223 frames):
 
 ---
 
-## 18. Actual Experimental Results
+## 18. Actual Experimental Results (Synthetic Benchmark)
+
+> **Note on Evaluation Protocol:** The metrics below represent evaluated performance across our synthetic benchmark test set of calibrated kinematic sequences. In real-world monocular field video, overall tracking confidence and camera perspective checks are applied to prevent overconfident inference.
 
 | Metric | Baseline (Logistic Regression) | Advanced (PyTorch BiLSTM) | Absolute Empirical Gain |
 | :--- | :---: | :---: | :---: |

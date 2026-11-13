@@ -121,7 +121,7 @@ export const EvaluationPage: React.FC = () => {
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Experimental results from trained BiLSTM temporal sequence model versus baseline classifier on held-out test data.
+            Experimental results from trained BiLSTM temporal sequence model versus baseline classifier on held-out test data (Synthetic Benchmark).
           </p>
         </div>
       </div>
@@ -129,9 +129,14 @@ export const EvaluationPage: React.FC = () => {
       {/* Model Overview & Metric Banners */}
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <div className="bg-navy-900/80 p-5 rounded-xl border border-navy-800 space-y-1">
-          <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-            BiLSTM Test Accuracy
-          </span>
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+              BiLSTM Test Accuracy
+            </span>
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-navy-800 text-brand-400 border border-brand-500/30">
+              Synthetic Benchmark
+            </span>
+          </div>
           <div className="text-3xl font-extrabold font-mono text-emerald-400">
             {(report.accuracy * 100).toFixed(2)}%
           </div>

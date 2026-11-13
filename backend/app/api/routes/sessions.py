@@ -1,10 +1,13 @@
 from pathlib import Path
+import logging
 from fastapi import APIRouter, HTTPException, Query
 from typing import Optional
 from pydantic import BaseModel
 from backend.app.schemas.sessions import SessionListResponse, SessionListItem
 from backend.app.repositories.session_repository import session_repo
 from backend.app.core.config import settings
+
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/sessions", tags=["Sessions"])
 
@@ -82,8 +85,8 @@ def delete_session(session_id: str):
     if s.get("original_path"):
         try:
             Path(s["original_path"]).unlink(missing_ok=True)
-        except Exception:
-            pass
+        except OSError as file_err:
+            logger.warning(f"Could not unlink original video file: {file_err}")
 
     annotated_file = settings.ANNOTATED_DIR / f"{session_id}_annotated.mp4"
     annotated_file.unlink(missing_ok=True)

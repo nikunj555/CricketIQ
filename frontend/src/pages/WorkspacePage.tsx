@@ -1296,7 +1296,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
               }`}
             >
               <Eye className="w-3.5 h-3.5" />
-              <span>{show3DComparison ? 'Hide 3D Reference Model' : 'Compare with 3D Model'}</span>
+              <span>{show3DComparison ? 'Hide Reference Technique Model' : 'Compare with Reference Model'}</span>
             </button>
           </div>
         </div>

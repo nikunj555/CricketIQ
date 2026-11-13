@@ -338,7 +338,8 @@ class SessionRepository:
                         data["summary"] = data["result"].get("summary")
                         data["overall_technique_score"] = data["result"].get("overall_technique_score")
                         data["top_mistakes"] = data["result"].get("top_mistakes")
-                except Exception:
+                except (json.JSONDecodeError, TypeError, ValueError) as json_err:
+                    logger.warning(f"Error parsing result_json for session {data.get('session_id')}: {json_err}")
                     data["result"] = None
             else:
                 data["result"] = None
@@ -380,7 +381,8 @@ class SessionRepository:
                             item["summary"] = item["result"].get("summary")
                             item["overall_technique_score"] = item["result"].get("overall_technique_score")
                             item["top_mistakes"] = item["result"].get("top_mistakes")
-                    except Exception:
+                    except (json.JSONDecodeError, TypeError, ValueError) as json_err:
+                        logger.warning(f"Error parsing result_json for session in list: {json_err}")
                         item["result"] = None
                 else:
                     item["result"] = None

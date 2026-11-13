@@ -1,5 +1,7 @@
 import uuid
 import shutil
+import logging
+import cv2
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form
@@ -10,6 +12,7 @@ from backend.app.data.reference_catalogue import get_reference_for_shot, get_ref
 from backend.app.data.shot_catalogue import get_shot_by_id_or_slug
 
 router = APIRouter(prefix="/reference", tags=["Reference Library"])
+logger = logging.getLogger(__name__)
 
 class ReferenceDetailResponse(BaseModel):
     id: str
@@ -79,21 +82,21 @@ async def upload_custom_reference(
     try:
         with open(saved_path, "wb") as buf:
             shutil.copyfileobj(file.file, buf)
-    except Exception as e:
+    except (OSError, IOError) as e:
+        logger.exception(f"Failed to save reference video {file.filename}: {e}")
         raise HTTPException(status_code=500, detail=f"Failed to save video: {e}")
 
     # Generate thumbnail
     thumb_filename = f"{ref_uuid}_thumb.jpg"
     thumb_path = settings.THUMBNAILS_DIR / thumb_filename
     try:
-        import cv2
         cap = cv2.VideoCapture(str(saved_path))
         ret, frame = cap.read()
         if ret:
             cv2.imwrite(str(thumb_path), frame)
         cap.release()
-    except Exception:
-        pass
+    except (cv2.error, OSError) as cv_err:
+        logger.warning(f"Could not extract thumbnail for reference {safe_filename}: {cv_err}")
 
     ref_dict = {
         "id": ref_uuid,

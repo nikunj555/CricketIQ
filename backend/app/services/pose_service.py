@@ -482,7 +482,7 @@ class MultiPersonTracker:
         needs_confirmation = False
         confirmation_message = None
         if len(ranked) > 1:
-            if best_meta["striker_score"] < 0.50 or abs(best_meta["striker_score"] - second_score) < 0.12:
+            if best_meta["striker_score"] < 0.50 or abs(best_meta["striker_score"] - second_score) < 0.15:
                 needs_confirmation = True
                 confirmation_message = "Could not tell who the striker is. Please select the batter"
 
@@ -536,9 +536,9 @@ class PoseService:
 
             self.init_error = None
             logger.info("MediaPipe Multi-PoseLandmarker (num_poses=6) & Crop-PoseLandmarker initialized successfully.")
-        except Exception as e:
+        except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
             self.init_error = f"{type(e).__name__}: {str(e)}"
-            logger.error(f"Failed to initialize PoseLandmarker: {e}")
+            logger.exception(f"Failed to initialize PoseLandmarker: {e}")
             self.landmarker = None
             self.crop_landmarker = None
 
@@ -617,7 +617,7 @@ class PoseService:
                 })
 
             return results
-        except Exception as e:
+        except (cv2.error, ValueError, RuntimeError, TypeError) as e:
             logger.warning(f"Multi-pose detection frame error: {e}")
             return []
 
@@ -646,7 +646,7 @@ class PoseService:
                     gt_data = json.load(f)
                 if isinstance(gt_data, dict) and "striker_candidates" in gt_data:
                     return gt_data["striker_candidates"]
-            except Exception as e:
+            except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                 logger.warning(f"Failed to load striker inspection from {gt_file.name}: {e}")
 
         cap = cv2.VideoCapture(str(video_path))

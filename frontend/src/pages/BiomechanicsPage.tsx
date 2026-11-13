@@ -66,7 +66,9 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
     );
   }
 
-  const impactMetrics = analysis.time_series.find((m) => m.phase.includes('Impact')) || analysis.time_series[Math.floor(analysis.time_series.length * 0.65)];
+  const summary = analysis.summary || ({} as any);
+  const timeSeries = analysis.time_series || [];
+  const impactMetrics = timeSeries.find((m) => m?.phase?.toLowerCase().includes('impact')) || (timeSeries.length > 0 ? timeSeries[Math.floor(timeSeries.length * 0.65)] : null);
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8 space-y-8">
@@ -84,7 +86,7 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
             <span>Biomechanical Technique Assessment</span>
           </h1>
           <p className="text-xs text-slate-400 mt-0.5">
-            Detailed kinematic trajectories and vector angle analysis for {analysis.shot_type} ({analysis.session_id})
+            Detailed kinematic trajectories and vector angle analysis for {analysis.shot_type || 'Selected Shot'} ({analysis.session_id})
           </p>
         </div>
       </div>
@@ -93,7 +95,7 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <MetricCard
           title="Lead Knee Flexion (Impact)"
-          value={analysis.summary.lead_knee_flexion_at_impact}
+          value={summary.lead_knee_flexion_at_impact}
           unit="°"
           benchmark="115°–135°"
           status="optimal"
@@ -101,12 +103,12 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         />
         <MetricCard
           title="Lead Elbow Flexion"
-          value={analysis.summary.lead_elbow_flexion_at_impact}
+          value={summary.lead_elbow_flexion_at_impact}
           unit="°"
           benchmark="135°–160°"
           status={
-            analysis.summary.lead_elbow_flexion_at_impact &&
-            analysis.summary.lead_elbow_flexion_at_impact < 125
+            summary.lead_elbow_flexion_at_impact &&
+            summary.lead_elbow_flexion_at_impact < 125
               ? 'warning'
               : 'optimal'
           }
@@ -115,8 +117,8 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         <MetricCard
           title="Lead Arm Extension"
           value={
-            analysis.summary.lead_arm_extension_at_impact
-              ? Number((analysis.summary.lead_arm_extension_at_impact * 100).toFixed(0))
+            summary.lead_arm_extension_at_impact
+              ? Number((summary.lead_arm_extension_at_impact * 100).toFixed(0))
               : null
           }
           unit="%"
@@ -127,16 +129,16 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         <MetricCard
           title="Head Over Lead Knee"
           value={
-            analysis.summary.head_over_knee_at_impact !== undefined && analysis.summary.head_over_knee_at_impact !== null
-              ? Number(Math.abs(analysis.summary.head_over_knee_at_impact).toFixed(2))
+            summary.head_over_knee_at_impact !== undefined && summary.head_over_knee_at_impact !== null
+              ? Number(Math.abs(summary.head_over_knee_at_impact).toFixed(2))
               : null
           }
           unit="offset"
           benchmark="< 0.15"
           status={
-            analysis.summary.head_over_knee_at_impact !== undefined &&
-            analysis.summary.head_over_knee_at_impact !== null &&
-            Math.abs(analysis.summary.head_over_knee_at_impact) > 0.22
+            summary.head_over_knee_at_impact !== undefined &&
+            summary.head_over_knee_at_impact !== null &&
+            Math.abs(summary.head_over_knee_at_impact) > 0.22
               ? 'warning'
               : 'optimal'
           }
@@ -144,7 +146,7 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         />
         <MetricCard
           title="Torso Forward Inclination"
-          value={analysis.summary.torso_lean_at_impact}
+          value={summary.torso_lean_at_impact}
           unit="°"
           benchmark="20°–32°"
           status="optimal"
@@ -153,8 +155,8 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         <MetricCard
           title="Front Foot Weight Transfer"
           value={
-            analysis.summary.weight_transfer_at_impact
-              ? Number((analysis.summary.weight_transfer_at_impact * 100).toFixed(0))
+            summary.weight_transfer_at_impact
+              ? Number((summary.weight_transfer_at_impact * 100).toFixed(0))
               : null
           }
           unit="%"
@@ -164,7 +166,7 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         />
         <MetricCard
           title="Head Stability Index"
-          value={analysis.summary.head_stability_index}
+          value={summary.head_stability_index}
           unit="norm"
           benchmark="< 0.08"
           status="optimal"
@@ -172,7 +174,7 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
         />
         <MetricCard
           title="Movement Smoothness"
-          value={analysis.summary.movement_smoothness}
+          value={summary.movement_smoothness}
           unit="/100"
           benchmark="> 75"
           status="optimal"
@@ -182,15 +184,15 @@ export const BiomechanicsPage: React.FC<BiomechanicsPageProps> = ({ sessionId, o
 
       {/* Synchronized Phase Timeline */}
       <PhaseTimeline
-        phases={analysis.phases}
+        phases={analysis.phases || []}
         currentFrame={currentFrame}
-        totalFrames={analysis.analyzed_frames}
+        totalFrames={analysis.analyzed_frames || analysis.total_frames || 0}
         onSelectFrame={setCurrentFrame}
       />
 
       {/* Interactive TimeSeries Chart Component */}
       <KinematicCharts
-        timeSeries={analysis.time_series}
+        timeSeries={timeSeries}
         currentFrame={currentFrame}
         onSelectFrame={setCurrentFrame}
       />

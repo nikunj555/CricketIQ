@@ -6,6 +6,7 @@ from fastapi import APIRouter
 from backend.app.core.config import settings
 from backend.app.services.pose_service import pose_service
 from backend.app.services.phase_service import phase_service
+from backend.app.services.hand_service import hand_service
 from backend.app.repositories.session_repository import session_repo
 
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -22,21 +23,36 @@ def health_check():
     except ImportError:
         pass
 
-    # Database diagnostics
-    db_ok = False
+    # Database diagnostics: connected & writable
+    db_connected = False
+    db_writable = False
     session_count = 0
     try:
         session_count = len(session_repo.list_sessions(limit=1000))
-        db_ok = True
-    except Exception:
-        pass
+        db_connected = True
+    except sqlite3.Error:
+        db_connected = False
+
+    try:
+        with sqlite3.connect(settings.DB_PATH) as conn:
+            cursor = conn.cursor()
+            cursor.execute("PRAGMA quick_check")
+            cursor.execute("BEGIN IMMEDIATE")
+            conn.rollback()
+            db_writable = True
+    except sqlite3.Error:
+        db_writable = False
+
+    # FFmpeg diagnostics
+    ffmpeg_path = shutil.which("ffmpeg")
+    ffmpeg_available = ffmpeg_path is not None
 
     # Storage diagnostics
     free_mb = 0.0
     try:
         usage = shutil.disk_usage(settings.STORAGE_DIR)
         free_mb = round(usage.free / (1024 * 1024), 2)
-    except Exception:
+    except OSError:
         pass
 
     # Calibrated shot catalogue count
@@ -44,18 +60,44 @@ def health_check():
     try:
         from backend.app.data.shot_catalogue import SHOT_CATALOGUE
         calibrated_shot_count = len(SHOT_CATALOGUE)
-    except Exception:
+    except ImportError:
         pass
 
+    pose_loaded = pose_service.landmarker is not None
+    phase_loaded = phase_service.model is not None
+    hand_loaded = hand_service.landmarker is not None
+
+    # Check overall system health
+    issues = []
+    if not pose_loaded:
+        issues.append("MediaPipe Pose Landmarker full model is not loaded.")
+    if not phase_loaded:
+        issues.append("BiLSTM Temporal Action Phase Classifier model is not loaded.")
+    if not hand_loaded:
+        issues.append("MediaPipe Hand Landmarker model is not loaded.")
+    if not ffmpeg_available:
+        issues.append("FFmpeg executable not found in system PATH.")
+    if not db_connected:
+        issues.append("SQLite database connection failed.")
+    elif not db_writable:
+        issues.append("SQLite database is read-only or locked.")
+
+    status = "healthy" if len(issues) == 0 else "degraded"
+
     return {
-        "status": "healthy" if db_ok and pose_service.landmarker is not None else "degraded",
+        "status": status,
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "python_version": sys.version.split()[0],
         "device": device,
         "torch_available": torch_available,
+        "ffmpeg": {
+            "available": ffmpeg_available,
+            "path": ffmpeg_path,
+        },
         "database": {
-            "connected": db_ok,
+            "connected": db_connected,
+            "writable": db_writable,
             "path": str(settings.DB_PATH),
             "session_count": session_count,
         },
@@ -67,22 +109,24 @@ def health_check():
             "thumbnails_exists": settings.THUMBNAILS_DIR.exists(),
         },
         "calibrated_shots_count": calibrated_shot_count,
+        "issues": issues,
         "models": {
             "pose_estimator": {
                 "name": "MediaPipe Pose Landmarker Full",
-                "loaded": pose_service.landmarker is not None,
+                "loaded": pose_loaded,
                 "asset_path": str(settings.MODEL_ASSET_PATH),
                 "asset_exists": settings.MODEL_ASSET_PATH.exists(),
                 "error": getattr(pose_service, "init_error", None),
             },
             "phase_classifier": {
                 "name": "BiLSTM Temporal Action Phase Classifier",
-                "loaded": phase_service.model is not None,
+                "loaded": phase_loaded,
                 "asset_path": str(settings.PHASE_MODEL_PATH),
                 "asset_exists": settings.PHASE_MODEL_PATH.exists(),
             },
             "hand_landmarker": {
                 "name": "MediaPipe Hand Landmarker",
+                "loaded": hand_loaded,
                 "asset_path": str(settings.HAND_MODEL_PATH),
                 "asset_exists": settings.HAND_MODEL_PATH.exists(),
             }

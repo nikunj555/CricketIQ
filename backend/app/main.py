@@ -2,6 +2,7 @@ import os
 import sys
 import hashlib
 import logging
+import sqlite3
 from pathlib import Path
 from contextlib import asynccontextmanager
 
@@ -34,7 +35,8 @@ def _get_file_sha256(path: Path) -> str:
             while chunk := f.read(65536):
                 h.update(chunk)
         return h.hexdigest()[:16]
-    except Exception:
+    except OSError as hash_err:
+        logger.warning(f"Could not calculate hash for {path}: {hash_err}")
         return "ERROR"
 
 @asynccontextmanager
@@ -55,8 +57,8 @@ async def lifespan(app: FastAPI):
     try:
         from backend.app.repositories.session_repository import session_repo
         session_count = len(session_repo.list_sessions(limit=1000))
-    except Exception:
-        pass
+    except sqlite3.Error as db_err:
+        logger.warning(f"Could not read session count on startup: {db_err}")
 
     frontend_dist = settings.BASE_DIR.parent / "frontend" / "dist"
     single_port_mode = "Single-Port SPA Mounted" if frontend_dist.exists() else "API Mode Only"

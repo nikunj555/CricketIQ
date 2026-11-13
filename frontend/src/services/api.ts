@@ -13,17 +13,26 @@ import {
   ShotListResponse,
 } from '../types/cricket';
 
+const isVercelHost =
+  typeof window !== 'undefined' && window.location.hostname.includes('vercel.app');
+
 const rawBase =
   import.meta.env.VITE_API_BASE ||
-  (typeof window !== 'undefined'
-    ? `${window.location.origin}/api`
-    : 'http://127.0.0.1:8000/api');
+  import.meta.env.VITE_API_BASE_URL ||
+  (isVercelHost
+    ? 'https://cricketiq-1-ekqx.onrender.com/api'
+    : (typeof window !== 'undefined'
+        ? `${window.location.origin}/api`
+        : 'http://127.0.0.1:8000/api'));
 
 const API_BASE = rawBase.replace(/\/+$/, '');
 
 async function apiFetch(input: string, init?: RequestInit): Promise<Response> {
   const isHealthCheck = typeof input === 'string' && input.includes('/health');
-  const timeoutMs = isHealthCheck ? 8000 : 45000;
+  const isUpload =
+    typeof input === 'string' &&
+    (input.includes('/video/upload') || input.includes('/inspect-strikers'));
+  const timeoutMs = isHealthCheck ? 8000 : (isUpload ? 180000 : 45000);
 
   const controller = new AbortController();
   const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
@@ -66,8 +75,31 @@ export const api = {
       body: formData,
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Upload failed' }));
-      throw new Error(err.detail || 'Upload failed');
+      let errorMsg = '';
+      try {
+        const err = await res.json();
+        if (typeof err.detail === 'string') {
+          errorMsg = err.detail;
+        } else if (Array.isArray(err.detail)) {
+          errorMsg = err.detail.map((d: any) => d.msg || d.type || JSON.stringify(d)).join('; ');
+        } else if (err.message) {
+          errorMsg = err.message;
+        } else if (err.error) {
+          errorMsg = err.error;
+        }
+      } catch {
+        const text = await res.text().catch(() => '');
+        if (text && text.length < 200 && !text.includes('<!DOCTYPE')) {
+          errorMsg = text;
+        } else if (res.status === 413) {
+          errorMsg = 'Video file exceeds upload size limit (max 150MB). Please select a shorter or compressed clip.';
+        } else if (res.status === 502 || res.status === 503) {
+          errorMsg = 'Backend AI service is starting up on the server. Please wait 15-30 seconds and retry.';
+        } else if (res.status === 504) {
+          errorMsg = 'Gateway timeout: video upload took too long or network connection was interrupted.';
+        }
+      }
+      throw new Error(errorMsg || `Upload failed with status ${res.status} (${res.statusText || 'Error'})`);
     }
     return res.json();
   },
@@ -78,8 +110,16 @@ export const api = {
       body: formData,
     });
     if (!res.ok) {
-      const err = await res.json().catch(() => ({ detail: 'Striker inspection failed' }));
-      throw new Error(err.detail || 'Striker inspection failed');
+      let errorMsg = '';
+      try {
+        const err = await res.json();
+        if (typeof err.detail === 'string') {
+          errorMsg = err.detail;
+        } else if (Array.isArray(err.detail)) {
+          errorMsg = err.detail.map((d: any) => d.msg || JSON.stringify(d)).join('; ');
+        }
+      } catch {}
+      throw new Error(errorMsg || `Striker inspection failed (${res.status})`);
     }
     return res.json();
   },

@@ -1,4 +1,5 @@
 import base64
+import binascii
 import time
 import math
 import logging
@@ -70,7 +71,7 @@ class LiveCoachService:
                     import json
                     with open(gt_file, "r") as f:
                         self._groundtruth_cache[stem] = json.load(f)
-                except Exception as e:
+                except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                     logger.warning(f"Failed to load GT file {gt_file}: {e}")
                     self._groundtruth_cache[stem] = []
             else:
@@ -91,7 +92,7 @@ class LiveCoachService:
             nparr = np.frombuffer(img_bytes, np.uint8)
             img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
             return img
-        except Exception as e:
+        except (binascii.Error, ValueError, cv2.error) as e:
             logger.warning(f"Failed to decode base64 frame: {e}")
             return None
 
@@ -465,7 +466,7 @@ class LiveCoachService:
                 clip_bytes = base64.b64decode(video_base64)
                 with open(original_clip_path, "wb") as f:
                     f.write(clip_bytes)
-            except Exception as e:
+            except (binascii.Error, OSError, IOError) as e:
                 logger.warning(f"Could not write live attempt clip: {e}")
 
         # Render quick thumbnail using placeholder silhouette

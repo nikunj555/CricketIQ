@@ -52,8 +52,8 @@ class HandService:
             )
             self.landmarker = vision.HandLandmarker.create_from_options(options)
             logger.info("MediaPipe HandLandmarker initialized successfully.")
-        except Exception as e:
-            logger.warning(f"Failed to initialize MediaPipe HandLandmarker: {e}")
+        except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
+            logger.exception(f"Failed to initialize MediaPipe HandLandmarker: {e}")
             self.landmarker = None
 
     def detect_hands(self, bgr_frame: np.ndarray, handedness: str = "Right") -> Dict[str, Any]:
@@ -166,8 +166,8 @@ class HandService:
                 "reliability_note": "Hand landmarks extracted. Grip metrics indicative of visible 2D closure."
             }
 
-        except Exception as e:
-            logger.warning(f"Hand detection error: {e}")
+        except (cv2.error, ValueError, RuntimeError, TypeError) as e:
+            logger.exception(f"Hand detection error: {e}")
             fallback["reliability_note"] = f"Inference exception: {str(e)}"
             return fallback
 

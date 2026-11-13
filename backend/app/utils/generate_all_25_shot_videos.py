@@ -637,7 +637,7 @@ def transcode_to_h264(video_path: Path):
         res = subprocess.run(cmd, capture_output=True, text=True, timeout=25)
         if res.returncode == 0 and temp_out.exists():
             temp_out.replace(video_path)
-    except Exception as e:
+    except (subprocess.SubprocessError, subprocess.TimeoutExpired, OSError, FileNotFoundError) as e:
         logger.warning(f"Could not transcode {video_path}: {e}")
 
 def generate_video_for_shot(cfg: dict):

@@ -83,12 +83,22 @@ async def inspect_strikers_endpoint(
 async def upload_video(
     background_tasks: BackgroundTasks,
     file: UploadFile = File(...),
-    shot_type: str = Form("Cover Drive"),
+    shot_type: str = Form("Auto-Detect"),
     handedness: str = Form("Right"),
     camera_angle: str = Form("Side View"),
-    striker_track_id: Optional[int] = Form(None),
+    striker_track_id: Optional[str] = Form(None),
     striker_tap_coords: Optional[str] = Form(None)
 ):
+    # Safely parse striker_track_id (preventing 422 if client sends 'undefined', 'null', or empty string)
+    parsed_striker_track_id: Optional[int] = None
+    if striker_track_id is not None:
+        clean_track = str(striker_track_id).strip()
+        if clean_track and clean_track.lower() not in ("none", "null", "undefined", ""):
+            try:
+                parsed_striker_track_id = int(clean_track)
+            except (ValueError, TypeError):
+                parsed_striker_track_id = None
+
     # Fail fast if server AI engine is not ready
     if pose_service.landmarker is None:
         raise HTTPException(
@@ -112,8 +122,9 @@ async def upload_video(
     try:
         with open(saved_path, "wb") as buffer:
             shutil.copyfileobj(file.file, buffer)
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Failed to save uploaded video: {str(e)}")
+    except (OSError, IOError) as e:
+        logger.exception(f"Failed to save uploaded video {file.filename}: {e}")
+        raise HTTPException(status_code=500, detail=f"Failed to save uploaded video to storage: {str(e)}")
 
     # Initial video validation check
     val = video_service.validate_video_file(saved_path)
@@ -129,7 +140,7 @@ async def upload_video(
         shot_type=shot_type,
         handedness=handedness,
         camera_angle=camera_angle,
-        striker_track_id=striker_track_id,
+        striker_track_id=parsed_striker_track_id,
         striker_tap_coords=striker_tap_coords
     )
 
@@ -142,7 +153,7 @@ async def upload_video(
         shot_type=shot_type,
         handedness=handedness,
         camera_angle=camera_angle,
-        striker_track_id=striker_track_id,
+        striker_track_id=parsed_striker_track_id,
         message="Video uploaded successfully. Biomechanical analysis in progress.",
         video_url=f"/api/video/original/{safe_filename}"
     )

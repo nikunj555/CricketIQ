@@ -169,7 +169,7 @@ class BatBallService:
             )
             if c_det is not None and len(c_det) > 0:
                 circles = c_det / scale_f
-        except Exception as e:
+        except (cv2.error, ValueError) as e:
             logger.debug(f"Ball HoughCircles search skipped: {e}")
             circles = None
 

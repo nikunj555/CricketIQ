@@ -106,7 +106,7 @@ def generate_cricket_clip(output_path: Path, num_frames: int = 60, fps: float = 
         res = subprocess.run(cmd, capture_output=True, text=True)
         if res.returncode == 0 and temp_out.exists():
             temp_out.replace(output_path)
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
         print(f"H.264 transcode notice: {e}")
 
 def seed_demo_sessions():

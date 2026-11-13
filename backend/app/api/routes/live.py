@@ -117,9 +117,9 @@ async def live_stream_websocket(websocket: WebSocket, session_id: str):
 
     except WebSocketDisconnect:
         logger.info(f"WebSocket client disconnected for session {session_id}")
-    except Exception as e:
-        logger.error(f"WebSocket error for session {session_id}: {e}")
+    except (RuntimeError, ValueError, OSError) as e:
+        logger.exception(f"WebSocket error for session {session_id}: {e}")
         try:
             await websocket.close()
-        except Exception:
+        except (RuntimeError, OSError):
             pass

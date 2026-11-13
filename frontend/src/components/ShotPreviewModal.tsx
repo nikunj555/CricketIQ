@@ -285,7 +285,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>3D Orbital Kinematics</span>
+              <span>Reference Technique Model</span>
             </button>
             <button
               onClick={() => setPreviewMode('blueprint')}

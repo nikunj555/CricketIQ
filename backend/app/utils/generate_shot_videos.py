@@ -555,7 +555,7 @@ def transcode_to_h264(video_path: Path):
         if res.returncode == 0 and temp_out.exists():
             temp_out.replace(video_path)
             print(f"Transcoded {video_path.name} to standard H.264.")
-    except Exception as e:
+    except (subprocess.SubprocessError, OSError, FileNotFoundError) as e:
         print(f"H.264 transcode notice for {video_path.name}: {e}")
 
 def generate_shot_video_and_session(cfg: dict):

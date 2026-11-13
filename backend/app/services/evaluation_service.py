@@ -1,7 +1,10 @@
 import json
+import logging
 from pathlib import Path
 from typing import Optional, Dict, Any
 from backend.app.schemas.evaluation import ModelEvaluationReport
+
+logger = logging.getLogger(__name__)
 
 class EvaluationService:
     def __init__(self, report_path: Optional[Path] = None):
@@ -11,10 +14,11 @@ class EvaluationService:
         if not self.report_path.exists():
             return None
         try:
-            with open(self.report_path, "r") as f:
+            with open(self.report_path, "r", encoding="utf-8") as f:
                 data = json.load(f)
             return ModelEvaluationReport(**data)
-        except Exception as e:
+        except (json.JSONDecodeError, OSError, ValueError) as e:
+            logger.exception(f"Failed to load evaluation report from {self.report_path}: {e}")
             return None
 
 evaluation_service = EvaluationService()

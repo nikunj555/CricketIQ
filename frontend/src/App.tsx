@@ -6,6 +6,7 @@ import { Menu, Sparkles, Command } from 'lucide-react';
 import { api } from './services/api';
 import { MotionProvider } from './context/MotionContext';
 import { CommandPalette } from './components/CommandPalette';
+import { SystemHealthBanner } from './components/SystemHealthBanner';
 
 // Code-split pages for cinematic load times & chunk isolation
 const LiveCoachPage = lazy(() => import('./pages/LiveCoachPage').then(m => ({ default: m.LiveCoachPage })));
@@ -167,6 +168,7 @@ export function App() {
           />
 
           <div className="flex-1 flex flex-col min-w-0">
+            <SystemHealthBanner />
             <main className="flex-1 pb-16">
               <Suspense fallback={<PageSkeleton />}>
                 {/* Mode A: Primary Real-Time Live AI Batting Coach */}
