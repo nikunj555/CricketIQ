@@ -306,12 +306,12 @@ class MultiPersonTracker:
 
         for tid, tr in self.tracks.items():
             hist = tr.get("history", [])
-            if not hist:
+            if not hist or len(hist) < 3:
                 classifications[tid] = {
                     "role": "other",
-                    "striker_score": 0.1,
-                    "confidence": 0.2,
-                    "reason": "Insufficient track history",
+                    "striker_score": 0.05,
+                    "confidence": 0.1,
+                    "reason": "Insufficient track history (fewer than 3 frames)",
                     "evidence": {"reason": "Insufficient track history"}
                 }
                 continue
@@ -327,6 +327,11 @@ class MultiPersonTracker:
             track_mean_vis = float(np.mean(vis_hist)) if vis_hist else 0.85
             is_low_quality = track_mean_vis < 0.40
             quality_factor = 1.0 if not is_low_quality else max(0.15, track_mean_vis / 0.60)
+
+            # Penalize transient tracks that persist for less than 15% of frames
+            track_presence_ratio = len(hist) / max(1, total_frames)
+            if track_presence_ratio < 0.15:
+                quality_factor *= min(1.0, track_presence_ratio / 0.15)
 
             # ----------------------------------------------------
             # Cue 1: Bat in Hand (Weight: 0.25)

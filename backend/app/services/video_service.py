@@ -135,13 +135,17 @@ class VideoService:
             height = val_info["height"]
             validation_warnings = val_info.get("warnings", [])
 
-            # Constrain frame dimensions to max 640 for lightweight memory footprint
-            max_proc_dim = 640
+            # Constrain frame dimensions to max 1280 for lightweight memory footprint while preserving landmark fidelity
+            max_proc_dim = 1280
             scale = 1.0
             if max(width, height) > max_proc_dim:
                 scale = max_proc_dim / float(max(width, height))
             out_w = int(round(width * scale))
             out_h = int(round(height * scale))
+            if out_h < 480 and height >= 480:
+                scale = 480.0 / float(height)
+                out_w = int(round(width * scale))
+                out_h = 480
             out_w = out_w if out_w % 2 == 0 else out_w - 1
             out_h = out_h if out_h % 2 == 0 else out_h - 1
 
@@ -478,10 +482,10 @@ class VideoService:
             # Post-Upload Validation: Pose Detection Quality Gate
             detected_poses = sum(1 for f in frame_metrics if f.get("pose_detected"))
             detection_rate = detected_poses / float(max(1, actual_total_frames))
-            if detection_rate < 0.50:
+            if detection_rate < 0.30:
                 reject_reason = (
                     f"Video rejected: Player pose was detected in only {detection_rate * 100:.1f}% of frames "
-                    f"(minimum required: 50.0%). Possible causes: camera is too far away, lighting is too dark, "
+                    f"(minimum required: 30.0%). Possible causes: camera is too far away, lighting is too dark, "
                     f"or the batter's full body (head to feet) was cut off by the camera frame."
                 )
                 session_repo.update_progress(session_id, "failed", 0.0, reject_reason, error=reject_reason)
