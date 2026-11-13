@@ -117,9 +117,13 @@ class ProgressService:
         - Highlight progress summary sentence
         - Recurring technical mistakes aggregated across sessions
         """
-        all_sessions = session_repo.list_sessions(limit=limit * 3)
         canonical_shot = reference_service.canonicalize_shot_name(shot_type)
         shot_lower = canonical_shot.lower().strip()
+        all_sessions = session_repo.list_sessions(limit=limit, shot_type=canonical_shot)
+        if not all_sessions and shot_type != canonical_shot:
+            all_sessions = session_repo.list_sessions(limit=limit, shot_type=shot_type)
+        if not all_sessions:
+            all_sessions = session_repo.list_sessions(limit=limit * 10)
 
         # Match sessions by shot type
         matching: List[Dict[str, Any]] = []

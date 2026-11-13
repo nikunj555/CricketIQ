@@ -357,10 +357,13 @@ class MultiPersonTracker:
             peak_wrist_vel = tr.get("peak_wrist_vel", 0.0)
             total_wrist_motion = tr.get("wrist_motion_total", 0.0)
             overhead_count = sum(1 for h in hist if h.get("is_overhead"))
-            has_bowling_arc = overhead_count >= 2
+            
+            # Bowling arc requires overhead arm motion accompanied by translation (unlike batting high follow-through)
+            has_bowling_runup = max_total_hip_disp > 0.25
+            has_bowling_arc = overhead_count >= 2 and has_bowling_runup
 
             is_rotational_swing = (peak_wrist_vel > 0.038 or total_wrist_motion > 0.40) and (not has_bowling_arc) and (max_total_hip_disp < 0.28)
-            is_bowler_runup = (has_bowling_arc and max_total_hip_disp > 0.10) or (max_total_hip_disp > 0.32 and not is_rotational_swing)
+            is_bowler_runup = (has_bowling_arc and max_total_hip_disp > 0.18) or (max_total_hip_disp > 0.32 and not is_rotational_swing)
             is_still_non_striker = (peak_wrist_vel < 0.032) or (total_wrist_motion < 0.30 and peak_wrist_vel < 0.038 and max_total_hip_disp < 0.18)
 
             if is_rotational_swing:
