@@ -5,7 +5,8 @@ ENV PYTHONUNBUFFERED=1 \
     MALLOC_ARENA_MAX=2 \
     OMP_NUM_THREADS=1 \
     OPENBLAS_NUM_THREADS=1 \
-    TF_ENABLE_ONEDNN_OPTS=0
+    TF_ENABLE_ONEDNN_OPTS=0 \
+    LD_LIBRARY_PATH=/usr/lib/x86_64-linux-gnu:/usr/local/lib:$LD_LIBRARY_PATH
 
 # Install system dependencies required by MediaPipe (libGLESv2, libEGL) and OpenCV
 RUN apt-get update && apt-get install -y --no-install-recommends \
