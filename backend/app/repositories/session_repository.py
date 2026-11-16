@@ -84,6 +84,7 @@ class SessionRepository:
                 "ALTER TABLE sessions ADD COLUMN user_confirmed_shot_type TEXT",
                 "ALTER TABLE sessions ADD COLUMN striker_track_id INTEGER DEFAULT NULL",
                 "ALTER TABLE sessions ADD COLUMN striker_tap_coords TEXT DEFAULT NULL",
+                "ALTER TABLE sessions ADD COLUMN manual_crop_box TEXT DEFAULT NULL",
                 "ALTER TABLE sessions ADD COLUMN detected_camera_view TEXT DEFAULT 'side-on'",
                 "ALTER TABLE sessions ADD COLUMN camera_view_warning TEXT DEFAULT NULL",
                 "ALTER TABLE sessions ADD COLUMN shot_mismatch_warning TEXT DEFAULT NULL",
@@ -158,6 +159,7 @@ class SessionRepository:
         category: Optional[str] = None,
         striker_track_id: Optional[int] = None,
         striker_tap_coords: Optional[str] = None,
+        manual_crop_box: Optional[str] = None,
         created_at: Optional[str] = None
     ) -> Dict[str, Any]:
         if not category or category == "Other":
@@ -167,18 +169,18 @@ class SessionRepository:
                 conn.execute("""
                     INSERT OR REPLACE INTO sessions (
                         session_id, video_filename, original_path, shot_type, predicted_shot_type,
-                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords,
+                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords, manual_crop_box,
                         status, progress, current_step, created_at
-                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing', ?)
-                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords, created_at))
+                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing', ?)
+                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords, manual_crop_box, created_at))
             else:
                 conn.execute("""
                     INSERT OR REPLACE INTO sessions (
                         session_id, video_filename, original_path, shot_type, predicted_shot_type,
-                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords,
+                        prediction_confidence, category, handedness, camera_angle, striker_track_id, striker_tap_coords, manual_crop_box,
                         status, progress, current_step
-                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing')
-                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords))
+                    ) VALUES (?, ?, ?, ?, ?, 0.0, ?, ?, ?, ?, ?, ?, 'queued', 0.0, 'File uploaded and queued for processing')
+                """, (session_id, video_filename, original_path, shot_type, shot_type, category, handedness, camera_angle, striker_track_id, striker_tap_coords, manual_crop_box))
             conn.commit()
         return self.get_session(session_id)
 

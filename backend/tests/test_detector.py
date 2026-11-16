@@ -278,3 +278,141 @@ def test_zero_api_key_leakage_in_health_and_repr():
     if raw_key and len(raw_key) > 5:
         assert raw_key not in health_str
         assert "api_key" not in health
+
+
+def test_behind_bowler_small_batter_selected_over_large_bowler():
+    """
+    STRIKER SELECTION REQUIREMENT:
+    In behind-the-bowler footage, the bowler is large in the foreground and the real batter is small at far end.
+    Bowler must NEVER be selected, and the small batter next to stumps with bat in hand MUST be selected.
+    """
+    service = DetectorService()
+
+    tracks = {
+        0: DetectionTrack(
+            track_id=0,
+            class_name="bowler",
+            last_bbox=[0.3, 0.45, 0.7, 0.98],
+            last_seen_frame=10,
+            history={i: [0.3, 0.45, 0.7, 0.98] for i in range(10)},
+            bat_overlap_count=0,
+            stumps_distance_sum=8.5,
+            stumps_distance_samples=10,
+            total_frames=10,
+            total_area_sum=2.12
+        ),
+        1: DetectionTrack(
+            track_id=1,
+            class_name="batter",
+            last_bbox=[0.45, 0.12, 0.55, 0.32],  # Small far-end batter
+            last_seen_frame=10,
+            history={i: [0.45, 0.12, 0.55, 0.32] for i in range(10)},
+            bat_overlap_count=7,
+            stumps_distance_sum=0.4,
+            stumps_distance_samples=10,
+            total_frames=10,
+            total_area_sum=0.20
+        ),
+        2: DetectionTrack(
+            track_id=2,
+            class_name="non_striker",
+            last_bbox=[0.8, 0.3, 0.95, 0.7],  # Side umpire/non-striker
+            last_seen_frame=10,
+            history={i: [0.8, 0.3, 0.95, 0.7] for i in range(10)},
+            bat_overlap_count=0,
+            stumps_distance_sum=5.0,
+            stumps_distance_samples=10,
+            total_frames=10,
+            total_area_sum=0.6
+        )
+    }
+
+    per_frame_dets = {
+        0: [
+            Detection("bowler", 0.95, [0.3, 0.45, 0.7, 0.98], [192, 216, 448, 470], (0.5, 0.71), (320, 343), 0.4, 0.53),
+            Detection("batter", 0.90, [0.45, 0.12, 0.55, 0.32], [288, 58, 352, 154], (0.5, 0.22), (320, 106), 0.1, 0.2),
+            Detection("non_striker", 0.85, [0.8, 0.3, 0.95, 0.7], [512, 144, 608, 336], (0.87, 0.5), (560, 240), 0.15, 0.4),
+            Detection("stumps", 0.92, [0.48, 0.22, 0.52, 0.32], [307, 106, 333, 154], (0.5, 0.27), (320, 130), 0.04, 0.1),
+            Detection("bat", 0.88, [0.46, 0.20, 0.50, 0.32], [294, 96, 320, 154], (0.48, 0.26), (307, 125), 0.04, 0.12)
+        ]
+    }
+
+    selected_tid, status, meta = service.select_striker(tracks, per_frame_dets)
+
+    # Must lock on track 1 (the small batter)
+    assert selected_tid == 1
+    assert status == "locked"
+    assert meta["selected_track_id"] == 1
+    # Bowler (track 0) and side person (track 2) must NOT be selected
+    candidate_ids = [c["track_id"] for c in meta["candidates"]]
+    assert 0 not in candidate_ids
+    assert 2 not in candidate_ids
+
+
+def test_unclear_only_when_margin_is_small():
+    """
+    AMBIGUITY THRESHOLD REQUIREMENT:
+    'unclear' appears ONLY when the top two candidates have genuinely close scores.
+    When scores are far apart, striker is locked cleanly.
+    """
+    service = DetectorService()
+
+    # 1. Wide margin: Batter A (score ~25), Batter B (score ~5) -> Must be locked
+    tracks_wide = {
+        0: DetectionTrack(track_id=0, class_name="batter", last_bbox=[0.4, 0.2, 0.6, 0.8], last_seen_frame=5,
+                          history={i: [0.4, 0.2, 0.6, 0.8] for i in range(5)}, bat_overlap_count=5, total_frames=5),
+        1: DetectionTrack(track_id=1, class_name="batter", last_bbox=[0.1, 0.2, 0.3, 0.8], last_seen_frame=5,
+                          history={i: [0.1, 0.2, 0.3, 0.8] for i in range(5)}, bat_overlap_count=0, total_frames=5)
+    }
+    tid_wide, stat_wide, meta_wide = service.select_striker(tracks_wide, {})
+    assert stat_wide == "locked"
+    assert tid_wide == 0
+
+    # 2. Narrow margin: Batter A (overlap 2), Batter B (overlap 2) -> Must report unclear
+    tracks_narrow = {
+        0: DetectionTrack(track_id=0, class_name="batter", last_bbox=[0.4, 0.2, 0.6, 0.8], last_seen_frame=5,
+                          history={i: [0.4, 0.2, 0.6, 0.8] for i in range(5)}, bat_overlap_count=2, total_frames=5),
+        1: DetectionTrack(track_id=1, class_name="batter", last_bbox=[0.42, 0.21, 0.62, 0.81], last_seen_frame=5,
+                          history={i: [0.42, 0.21, 0.62, 0.81] for i in range(5)}, bat_overlap_count=2, total_frames=5)
+    }
+    tid_narrow, stat_narrow, meta_narrow = service.select_striker(tracks_narrow, {})
+    assert stat_narrow == "striker_unclear"
+    assert tid_narrow is None
+    assert "close margin" in meta_narrow.get("reason", "")
+
+
+def test_camera_view_detection_behind_bowler():
+    """
+    CAMERA PERSPECTIVE REQUIREMENT:
+    Detect camera view as behind_bowler when foreground person + far stumps are present,
+    and issue honest warning regarding sagittal plane angle reliability.
+    """
+    service = DetectorService()
+
+    dets = [
+        Detection("bowler", 0.95, [0.3, 0.55, 0.7, 0.98], [192, 264, 448, 470], (0.5, 0.76), (320, 367), 0.4, 0.43),
+        Detection("stumps", 0.90, [0.48, 0.20, 0.52, 0.30], [307, 96, 333, 144], (0.5, 0.25), (320, 120), 0.04, 0.1)
+    ]
+
+    view_name, warning = service.estimate_camera_view(dets, (480, 640))
+    assert view_name == "behind_bowler"
+    assert warning is not None
+    assert "behind the bowler" in warning
+    assert "side-on" in warning
+
+
+def test_crop_and_upscale_for_pose():
+    """
+    SMALL TARGET POSE REQUIREMENT:
+    Small batter (<120px) is cropped with margin and upscaled to 480x480 for high landmark resolution.
+    """
+    service = DetectorService()
+    dummy_frame = np.ones((1080, 1920, 3), dtype=np.uint8) * 128
+    small_bbox = [0.45, 0.10, 0.55, 0.25]  # ~160px height in 1080p
+
+    upscaled, meta = service.crop_and_upscale_for_pose(dummy_frame, small_bbox, target_size=480)
+    assert upscaled.shape == (480, 480, 3)
+    assert meta["crop_x1"] < small_bbox[0]
+    assert meta["crop_x2"] > small_bbox[2]
+    assert meta["crop_y1"] < small_bbox[1]
+    assert meta["crop_y2"] > small_bbox[3]

@@ -432,24 +432,25 @@ class MultiPersonTracker:
             )
             striker_score = float(np.clip(raw_striker_score * quality_factor, 0.0, 1.0))
 
-            # Role classification & plain English rationale
+            # Role classification & plain English rationale (Never select bowler or non-striker)
             if is_low_quality:
                 role = "low-confidence"
-                striker_score = min(striker_score, 0.20)
+                striker_score = min(striker_score, 0.15)
                 reason = "Excluded: Low landmark visibility or keypoints severely occluded."
-            elif is_bowler_runup and not is_rotational_swing:
+            elif is_bowler_runup or has_bowling_arc or (max_total_hip_disp > 0.18 and cue1_bat_pose_score < 0.40):
                 role = "bowler"
-                striker_score = min(striker_score, 0.20)
-                reason = f"Excluded as Bowler: Run-up displacement ({max_total_hip_disp:.2f}) and overhead delivery arc detected."
-            elif is_still_non_striker:
+                striker_score = min(striker_score, 0.08)  # Heavy penalty for bowlers
+                reason = f"Excluded as Bowler: Run-up displacement ({max_total_hip_disp:.2f}) and delivery action detected."
+            elif is_still_non_striker or (cue1_bat_pose_score < 0.35 and total_wrist_motion < 0.30):
                 role = "non-striker"
-                striker_score = min(striker_score, 0.30)
-                reason = f"Excluded as Non-Striker: Stationary positioning without batting stroke motion (peak wrist speed {peak_wrist_vel:.3f})."
-            elif is_rotational_swing or striker_score >= 0.50:
+                striker_score = min(striker_score, 0.15)
+                reason = f"Excluded as Non-Striker: Stationary positioning without batting stroke motion."
+            elif is_rotational_swing or (striker_score >= 0.45 and cue1_bat_pose_score >= 0.40):
                 role = "striker"
-                reason = f"Selected as Striker: Bat in hand ({cue1_bat_pose_score:.2f}), stationary crease position ({cue2_position_score:.2f}), rotational swing ({cue3_motion_score:.2f}), and batting stance posture."
+                reason = f"Selected as Striker: Bat in hand ({cue1_bat_pose_score:.2f}), stationary crease position ({cue2_position_score:.2f}), and batting posture."
             else:
                 role = "other"
+                striker_score = min(striker_score, 0.25)
                 reason = f"Excluded: Track does not exhibit primary batting striker characteristics."
 
             evidence = {
@@ -479,20 +480,24 @@ class MultiPersonTracker:
                 "evidence": evidence
             }
 
-        # Select best striker track
+        # Select best striker track (prioritizing non-bowler candidates)
         ranked = sorted(classifications.items(), key=lambda item: item[1]["striker_score"], reverse=True)
         best_tid, best_meta = ranked[0]
         second_score = ranked[1][1]["striker_score"] if len(ranked) > 1 else 0.0
 
-        # Mark confirmed striker role on top candidate
-        classifications[best_tid]["role"] = "striker"
+        if best_meta.get("role") != "bowler":
+            classifications[best_tid]["role"] = "striker"
 
         needs_confirmation = False
         confirmation_message = None
         if len(ranked) > 1:
-            if best_meta["striker_score"] < 0.50 or abs(best_meta["striker_score"] - second_score) < 0.15:
+            score_diff = abs(best_meta["striker_score"] - second_score)
+            if score_diff < max(0.12, 0.15 * best_meta["striker_score"]) and best_meta["striker_score"] >= 0.35:
                 needs_confirmation = True
-                confirmation_message = "Could not tell who the striker is. Please select the batter"
+                confirmation_message = f"Two candidates scored within close margin ({best_meta['striker_score']:.2f} vs {second_score:.2f}). Please select the batter."
+            elif best_meta["striker_score"] < 0.40 or best_meta.get("role") == "bowler":
+                needs_confirmation = True
+                confirmation_message = f"Striker confidence is low ({best_meta['striker_score']:.2f}). Please select or draw a box around the batter."
 
         self.track_classifications = classifications
         return best_tid, classifications, needs_confirmation, confirmation_message
@@ -726,11 +731,17 @@ class PoseService:
         # Build candidate summaries across all observed tracks in the initial window
         all_track_ids = list(tracker.tracks.keys())
         candidates = []
+        has_small_striker = False
 
         for tid in all_track_ids:
             tr = tracker.tracks.get(tid, {})
             bbox = tr.get("bbox", [0.0, 0.0, 1.0, 1.0])
+            box_height_px = int(round((bbox[3] - bbox[1]) * h))
+            is_small = box_height_px < 120
             is_default = (tid == best_tid)
+            if is_default and is_small:
+                has_small_striker = True
+
             meta = classifications.get(tid, {})
             role = meta.get("role", "striker" if is_default else "other")
             role_label = "Suggested Striker (Locked)" if is_default else f"{role.replace('_', ' ').title()} (Excluded)"
@@ -741,12 +752,19 @@ class PoseService:
                 "is_default": is_default,
                 "is_suggested_striker": is_default,
                 "role": role_label,
+                "class_name": role,
                 "striker_score": meta.get("striker_score", 0.0),
                 "reason": meta.get("reason", ""),
+                "box_height_px": box_height_px,
+                "is_small_target": is_small,
                 "wrist_motion_score": round(tr.get("wrist_motion_total", 0.0), 3),
                 "confidence": meta.get("confidence", 0.75 if is_default else 0.3),
                 "evidence": meta.get("evidence", {})
             })
+
+        camera_warning = None
+        if has_small_striker:
+            camera_warning = "Camera too far, angle and shot results will be less reliable"
 
         return {
             "candidates": candidates,
@@ -756,7 +774,8 @@ class PoseService:
             "frame_height": h,
             "needs_confirmation": needs_confirmation,
             "confirmation_message": confirmation_message,
-            "classifications": classifications
+            "classifications": classifications,
+            "camera_warning": camera_warning
         }
 
     def draw_person_boxes(

@@ -461,6 +461,30 @@ def test_uncertainty_reporting_when_margin_is_narrow():
         assert res["is_uncertain"] is True
         assert "Unsure:" in res["uncertainty_label"]
 
+
+def test_manual_box_override_when_detector_finds_nothing():
+    """
+    MANUAL SELECTION REQUIREMENT:
+    When the user draws a custom bounding box, it overrides automatic tracking,
+    locking pose tracking exclusively to the user-specified box.
+    """
+    import json
+    vs = VideoService()
+    manual_box = [0.44, 0.10, 0.56, 0.32]  # Custom batter box
+    sid = "test_manual_box_session"
+    session_repo.create_session(
+        session_id=sid,
+        video_filename="user_cover_drive.mp4",
+        original_path="backend/tests/fixtures/user_cover_drive.mp4",
+        manual_crop_box=json.dumps(manual_box)
+    )
+    vs.process_video_session(sid)
+    sess = session_repo.get_session(sid)
+    assert sess["status"] == "completed"
+    res = sess.get("result", {})
+    assert res.get("striker_selection_method") == "user_manual_box"
+    assert res.get("detector_status") == "user_confirmed"
+
 if __name__ == "__main__":
     print("Running test_striker_vs_bowler_classification()...")
     test_striker_vs_bowler_classification()

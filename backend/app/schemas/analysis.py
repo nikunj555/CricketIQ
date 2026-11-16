@@ -185,6 +185,11 @@ class StrikerCandidate(BaseModel):
     role: str
     wrist_motion_score: float
     confidence: Optional[float] = None
+    striker_score: Optional[float] = None
+    class_name: Optional[str] = "batter"
+    reason: Optional[str] = None
+    box_height_px: Optional[int] = None
+    is_small_target: Optional[bool] = False
     evidence: Optional[Dict[str, Any]] = None
 
 class StrikerInspectionResponse(BaseModel):
@@ -197,6 +202,13 @@ class StrikerInspectionResponse(BaseModel):
     frame_0_data_url: Optional[str] = None
     needs_confirmation: bool = False
     confirmation_message: Optional[str] = None
+    detection_source: str = "roboflow"
+    detector_status: str = "active"
+    detector_reason: Optional[str] = None
+    roboflow_calls_used: int = 0
+    camera_view: Optional[str] = "side_on"
+    camera_warning: Optional[str] = None
+    scrub_frames: Optional[List[Dict[str, Any]]] = None
 
 class VideoUploadResponse(BaseModel):
     session_id: str

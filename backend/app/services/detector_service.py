@@ -252,6 +252,165 @@ class DetectorService:
         self.last_call_error = last_err_msg
         return [], "api_error"
 
+    def detect_frame_two_pass(
+        self,
+        frame: np.ndarray,
+        call_counter: Optional[Dict[str, int]] = None
+    ) -> Tuple[List[Detection], str, int]:
+        """
+        Two-pass detection for small, distant batters (e.g. behind-the-bowler footage):
+        - Pass 1: Full-frame detection to locate stumps, bowler, and large foreground objects.
+        - Pass 2: If a far-end wicket or pitch target is found, or if no batter was detected in Pass 1,
+                  extract a high-resolution crop around the stumps/batter crease and run inference.
+        Returns (combined_detections, status_code, num_calls_made).
+        """
+        calls_before = call_counter.get("count", 0) if call_counter else 0
+        pass1_dets, status = self.detect_frame(frame, call_counter=call_counter)
+        if status != "ok":
+            calls_made = (call_counter.get("count", 0) if call_counter else 0) - calls_before
+            return pass1_dets, status, calls_made
+
+        # Check if Pass 1 detected a confident batter
+        has_confident_batter = any(d.class_name == "batter" and d.confidence >= 0.50 for d in pass1_dets)
+        
+        # Check if we have quota for Pass 2
+        max_calls = settings.ROBOFLOW_MAX_CALLS_PER_VIDEO
+        current_calls = call_counter.get("count", 0) if call_counter else 0
+        if current_calls >= max_calls or has_confident_batter:
+            calls_made = current_calls - calls_before
+            return pass1_dets, "ok", calls_made
+
+        # Pass 2: Find region around far stumps or upper-center pitch
+        stumps_dets = [d for d in pass1_dets if d.class_name == "stumps"]
+        h, w = frame.shape[:2]
+
+        if stumps_dets:
+            # Sort stumps by y coordinate (upper half = far end batter's wicket)
+            stumps_dets.sort(key=lambda s: s.center[1])
+            target_stump = stumps_dets[0]
+            scx, scy = target_stump.center
+            # Generous crop around far stumps (batter stands next to and extends above wickets)
+            crop_x1 = max(0.0, scx - 0.22)
+            crop_x2 = min(1.0, scx + 0.22)
+            crop_y1 = max(0.0, target_stump.bbox[1] - 0.35)
+            crop_y2 = min(1.0, target_stump.bbox[3] + 0.15)
+        else:
+            # Upper-center pitch region where far-end wicket & batter stand in behind-bowler view
+            crop_x1, crop_y1, crop_x2, crop_y2 = 0.20, 0.05, 0.80, 0.70
+
+        px_x1 = max(0, int(round(crop_x1 * w)))
+        px_y1 = max(0, int(round(crop_y1 * h)))
+        px_x2 = min(w, int(round(crop_x2 * w)))
+        px_y2 = min(h, int(round(crop_y2 * h)))
+
+        if px_x2 - px_x1 >= 80 and px_y2 - px_y1 >= 80:
+            crop_frame = frame[px_y1:px_y2, px_x1:px_x2]
+            pass2_dets, p2_status = self.detect_frame(crop_frame, call_counter=call_counter)
+            if p2_status == "ok" and pass2_dets:
+                crop_w = px_x2 - px_x1
+                crop_h = px_y2 - px_y1
+                for d in pass2_dets:
+                    # Project crop coords back to full-frame normalized coords
+                    full_x1 = round(crop_x1 + d.bbox[0] * (crop_x2 - crop_x1), 4)
+                    full_y1 = round(crop_y1 + d.bbox[1] * (crop_y2 - crop_y1), 4)
+                    full_x2 = round(crop_x1 + d.bbox[2] * (crop_x2 - crop_x1), 4)
+                    full_y2 = round(crop_y1 + d.bbox[3] * (crop_y2 - crop_y1), 4)
+                    full_px_x1 = int(round(full_x1 * w))
+                    full_px_y1 = int(round(full_y1 * h))
+                    full_px_x2 = int(round(full_x2 * w))
+                    full_px_y2 = int(round(full_y2 * h))
+
+                    # Deduplicate with Pass 1 using IoU
+                    mapped_bbox = [full_x1, full_y1, full_x2, full_y2]
+                    is_dup = any(calculate_iou(mapped_bbox, ex.bbox) > 0.40 for ex in pass1_dets)
+                    if not is_dup:
+                        pass1_dets.append(Detection(
+                            class_name=d.class_name,
+                            confidence=d.confidence,
+                            bbox=mapped_bbox,
+                            bbox_px=[full_px_x1, full_px_y1, full_px_x2, full_px_y2],
+                            center=((full_x1 + full_x2) / 2.0, (full_y1 + full_y2) / 2.0),
+                            center_px=((full_px_x1 + full_px_x2) // 2, (full_px_y1 + full_px_y2) // 2),
+                            width=round(full_x2 - full_x1, 4),
+                            height=round(full_y2 - full_y1, 4),
+                            class_id=d.class_id,
+                            detection_id=d.detection_id
+                        ))
+
+        calls_made = (call_counter.get("count", 0) if call_counter else 0) - calls_before
+        return pass1_dets, "ok", calls_made
+
+    def estimate_camera_view(
+        self,
+        detections: List[Detection],
+        frame_shape: Tuple[int, int]
+    ) -> Tuple[str, Optional[str]]:
+        """
+        Estimates camera setup based on person and stumps positions.
+        Returns (view_name, warning_message).
+        view_name: 'behind_bowler' | 'behind_batter' | 'side_on'
+        """
+        stumps_dets = [d for d in detections if d.class_name == "stumps"]
+        person_dets = [d for d in detections if d.class_name in ("batter", "bowler", "non_striker")]
+
+        # Check for behind-the-bowler setup:
+        # A person in foreground (large, bottom half cy > 0.55), stumps or batter in upper half (cy < 0.55)
+        has_foreground_bowler = any(
+            (d.class_name == "bowler" or (d.center[1] > 0.55 and d.height > 0.35))
+            for d in person_dets
+        )
+        has_far_end_target = any(
+            d.center[1] < 0.55 for d in (stumps_dets + person_dets)
+        )
+
+        if has_foreground_bowler and has_far_end_target:
+            warning = (
+                "Notice: Camera is positioned behind the bowler. Sagittal plane metrics (knee flexion, "
+                "stride length, spine tilt) are projected at an oblique angle and are less reliable. "
+                "A 90° side-on recording is recommended for accurate biomechanics."
+            )
+            return "behind_bowler", warning
+
+        return "side_on", None
+
+    def crop_and_upscale_for_pose(
+        self,
+        frame: np.ndarray,
+        bbox: List[float],
+        target_size: int = 480
+    ) -> Tuple[np.ndarray, Dict[str, float]]:
+        """
+        Crops around a small or distant batter and upscales to target_size for high-accuracy pose estimation.
+        Returns (upscaled_crop, crop_meta).
+        crop_meta contains: crop_x1, crop_y1, crop_x2, crop_y2 (normalized coordinates).
+        """
+        h, w = frame.shape[:2]
+        pad_x = 0.20 * max(0.05, bbox[2] - bbox[0])
+        pad_y = 0.15 * max(0.08, bbox[3] - bbox[1])
+
+        x1 = max(0.0, bbox[0] - pad_x)
+        y1 = max(0.0, bbox[1] - pad_y)
+        x2 = min(1.0, bbox[2] + pad_x)
+        y2 = min(1.0, bbox[3] + pad_y)
+
+        px_x1 = max(0, int(round(x1 * w)))
+        px_y1 = max(0, int(round(y1 * h)))
+        px_x2 = min(w, int(round(x2 * w)))
+        px_y2 = min(h, int(round(y2 * h)))
+
+        if px_x2 <= px_x1 + 10 or px_y2 <= px_y1 + 10:
+            return frame, {"crop_x1": 0.0, "crop_y1": 0.0, "crop_x2": 1.0, "crop_y2": 1.0}
+
+        cropped = frame[px_y1:px_y2, px_x1:px_x2]
+        upscaled = cv2.resize(cropped, (target_size, target_size), interpolation=cv2.INTER_LINEAR)
+
+        return upscaled, {
+            "crop_x1": x1,
+            "crop_y1": y1,
+            "crop_x2": x2,
+            "crop_y2": y2
+        }
+
     def _parse_predictions(
         self,
         predictions: List[Dict[str, Any]],
@@ -438,14 +597,14 @@ class DetectorService:
                                 tr.bat_overlap_count += 1
                                 break
 
-        # Step 3: Score and rank candidate batters
-        # Primary score: bat_overlap_count * 10.0 + total_frames * 0.1
+        # Step 3: Score and rank candidate batters (Never bowler, non-striker, or umpire)
+        # Primary score: bat_overlap_count * 15.0 + stumps proximity * 10.0 + persistence * 0.2
+        # (Zero area bias, so distant/small batters are never penalized against large foreground bowlers)
         candidates = []
         for tr in batter_tracks:
             score = (
-                (tr.bat_overlap_count * 10.0)
-                + (tr.avg_area * 5.0)
-                + ((1.0 - min(1.0, tr.avg_stumps_distance)) * 3.0)
+                (tr.bat_overlap_count * 15.0)
+                + (max(0.0, 1.0 - min(1.0, tr.avg_stumps_distance)) * 10.0)
                 + (tr.total_frames * 0.2)
             )
             candidates.append({
@@ -466,11 +625,12 @@ class DetectorService:
             top = candidates[0]
             second = candidates[1]
             score_diff = abs(top["score"] - second["score"])
-            # If two batters are close (e.g. difference <= 2.0 and both have bat overlaps or both 0)
-            if score_diff <= 2.0:
+            # Unclear only if scores are genuinely close (within 15% of top score or <= 1.2)
+            close_threshold = max(1.2, 0.15 * top["score"])
+            if score_diff <= close_threshold:
                 logger.info(f"Striker selection unclear: Track #{top['track_id']} ({top['score']}) vs Track #{second['track_id']} ({second['score']}).")
                 return None, "striker_unclear", {
-                    "reason": f"Two batter candidates scored within close margin ({top['score']} vs {second['score']}).",
+                    "reason": f"Two batter candidates scored within close margin ({top['score']:.2f} vs {second['score']:.2f}). Please tap the striker.",
                     "candidate_count": len(candidates),
                     "candidates": candidates
                 }

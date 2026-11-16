@@ -142,6 +142,17 @@ class VideoService:
         camera_angle = session_data.get("camera_angle", "Side View")
         striker_track_id = session_data.get("striker_track_id")
         striker_tap_coords = session_data.get("striker_tap_coords")
+        manual_crop_box_raw = session_data.get("manual_crop_box")
+        parsed_manual_box = None
+        if manual_crop_box_raw:
+            try:
+                import json
+                if isinstance(manual_crop_box_raw, str):
+                    parsed_manual_box = json.loads(manual_crop_box_raw)
+                elif isinstance(manual_crop_box_raw, list):
+                    parsed_manual_box = manual_crop_box_raw
+            except Exception:
+                parsed_manual_box = None
 
         try:
             session_repo.update_progress(session_id, "processing", 5.0, "Validating input video...")
@@ -342,9 +353,15 @@ class VideoService:
             # Multi-cue striker classification across all detected tracks (fallback and candidate provider)
             best_tid, track_classifications, needs_confirmation, confirmation_message = tracker.classify_tracks(total_frames=actual_total_frames)
 
-            # Resolve locked active striker (user override > Roboflow RF-DETR > tap coords > multi-cue fallback)
+            # Resolve locked active striker (manual box > track ID > tap coords > Roboflow RF-DETR > multi-cue fallback)
             striker_select_method = "automatic_multi_cue"
-            if striker_track_id is not None:
+            if parsed_manual_box and len(parsed_manual_box) == 4:
+                active_striker_id = 999
+                striker_select_method = "user_manual_box"
+                detector_status = "user_confirmed"
+                detector_message = "Striker manually defined by user bounding box"
+                striker_selection_reason = "User manual box override"
+            elif striker_track_id is not None:
                 active_striker_id = striker_track_id
                 striker_select_method = "user_specified_track"
                 detector_status = "user_confirmed"
@@ -420,7 +437,18 @@ class VideoService:
                 f_tracks = per_frame_person_tracks[s_idx]
                 lms = None
                 world_lms = None
-                if active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
+                if active_striker_id == 999 and parsed_manual_box:
+                    best_m_iou = 0.0
+                    best_m_tid = None
+                    for tid, t_info in f_tracks.items():
+                        iou = calculate_iou(parsed_manual_box, t_info["bbox"])
+                        if iou > best_m_iou:
+                            best_m_iou = iou
+                            best_m_tid = tid
+                    if best_m_tid is not None and best_m_iou > 0.10:
+                        lms = f_tracks[best_m_tid]["landmarks"]
+                        world_lms = f_tracks[best_m_tid]["world_landmarks"]
+                elif active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
                     lms = f_tracks[active_striker_id]["landmarks"]
                     world_lms = f_tracks[active_striker_id]["world_landmarks"]
                 elif active_striker_id is None and len(f_tracks) == 1:
@@ -607,8 +635,21 @@ class VideoService:
             detected_view = view_analysis.get("detected_view", "side-on")
             view_conf = view_analysis.get("confidence", 0.85)
 
+            # Check Roboflow object detector perspective cues (foreground bowler + far wickets)
+            if per_frame_rf_detections:
+                all_dets = [d for d_list in per_frame_rf_detections.values() for d in d_list]
+                rf_cam_view, rf_cam_warn = detector_service.estimate_camera_view(all_dets, (height, width))
+                if rf_cam_view == "behind_bowler":
+                    detected_view = "behind_bowler"
+
             camera_view_warning = None
-            if detected_view != "side-on":
+            if detected_view in ("behind_bowler", "pitch-view", "behind the bowler's arm"):
+                camera_view_warning = (
+                    "Notice: Camera is positioned behind the bowler. Sagittal plane metrics "
+                    "(knee flexion, stride length, spine tilt) are projected at an oblique angle and are less reliable. "
+                    "A 90° side-on recording is recommended for accurate biomechanics."
+                )
+            elif detected_view != "side-on":
                 rec_angle = geometry_service.get_recommended_camera_angle(shot_type)
                 camera_view_warning = f"Camera perspective detected as {detected_view} ({int(view_conf * 100)}%). {rec_angle}"
 
@@ -868,6 +909,20 @@ class VideoService:
                 "Perspective Dependency: Metrics assume a camera placed 3-6 meters away at pitch level (~1.2m height). Elevation or extreme oblique angles alter measured torso tilt.",
                 "Individual Anatomy: Biomechanical ranges represent coaching guidelines; individual physical proportions and coaching philosophies may vary."
             ]
+
+            # If batter is smaller than ~120px tall in raw footage, add explicit warning
+            striker_box_h = 999
+            if active_striker_id in tracker.tracks:
+                sb = tracker.tracks[active_striker_id].get("bbox", [])
+                if len(sb) == 4:
+                    striker_box_h = int(round((sb[3] - sb[1]) * height))
+            elif parsed_manual_box and len(parsed_manual_box) == 4:
+                striker_box_h = int(round((parsed_manual_box[3] - parsed_manual_box[1]) * height))
+            if striker_box_h < 120:
+                limitations.insert(0, f"Distant Subject: Camera too far, angle and shot results will be less reliable (batsman height is {striker_box_h}px < 120px).")
+
+            if camera_view_warning:
+                limitations.insert(0, camera_view_warning)
 
             model_metadata = {
                 "pose_estimator": "MediaPipe Pose Landmarker Full (Google)",

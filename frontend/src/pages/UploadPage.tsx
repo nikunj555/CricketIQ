@@ -32,6 +32,11 @@ export const UploadPage: React.FC<UploadPageProps> = ({
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
   const [strikerInspection, setStrikerInspection] = useState<any>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
+  const [manualBox, setManualBox] = useState<[number, number, number, number] | null>(null);
+  const [isDrawingBox, setIsDrawingBox] = useState<boolean>(false);
+  const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null);
+  const [currentDrag, setCurrentDrag] = useState<{ x: number; y: number } | null>(null);
+  const [scrubIndex, setScrubIndex] = useState<number>(0);
   const [isInspecting, setIsInspecting] = useState<boolean>(false);
   const [serverReady, setServerReady] = useState<boolean>(true);
   const [isServerWarmingUp, setIsServerWarmingUp] = useState<boolean>(false);
@@ -90,15 +95,17 @@ export const UploadPage: React.FC<UploadPageProps> = ({
   const checkStrikers = async (file: File) => {
     try {
       setIsInspecting(true);
+      setManualBox(null);
+      setScrubIndex(0);
       const fd = new FormData();
       fd.append('file', file);
       const inspection = await api.inspectStrikers(fd);
-      if (inspection && inspection.candidates && inspection.candidates.length > 1) {
+      if (inspection) {
         setStrikerInspection(inspection);
         setSelectedTrackId(inspection.default_track_id);
       } else {
         setStrikerInspection(null);
-        setSelectedTrackId(inspection?.default_track_id ?? null);
+        setSelectedTrackId(null);
       }
     } catch {
       setStrikerInspection(null);
@@ -213,7 +220,9 @@ export const UploadPage: React.FC<UploadPageProps> = ({
       formData.append('shot_type', shotType);
       formData.append('handedness', handedness);
       formData.append('camera_angle', cameraAngle);
-      if (selectedTrackId !== null && selectedTrackId !== undefined && !isNaN(Number(selectedTrackId))) {
+      if (manualBox) {
+        formData.append('manual_crop_box', JSON.stringify(manualBox));
+      } else if (selectedTrackId !== null && selectedTrackId !== undefined && !isNaN(Number(selectedTrackId))) {
         formData.append('striker_track_id', selectedTrackId.toString());
       }
 
@@ -332,78 +341,265 @@ export const UploadPage: React.FC<UploadPageProps> = ({
               </div>
             )}
 
-            {strikerInspection && strikerInspection.candidates && strikerInspection.candidates.length > 1 && (
-              <div className={`bg-[#111315] border rounded-xl p-4 space-y-3 ${strikerInspection.needs_confirmation ? 'border-red-500/80 shadow-lg shadow-red-950/30' : 'border-amber-600/60'}`}>
-                <div className="flex items-center justify-between">
-                  <div className={`flex items-center space-x-2 text-xs font-bold ${strikerInspection.needs_confirmation ? 'text-red-400' : 'text-amber-300'}`}>
-                    <Camera className={`w-4 h-4 ${strikerInspection.needs_confirmation ? 'text-red-400' : 'text-amber-400'}`} />
+            {strikerInspection && (
+              <div className={`bg-[#111315] border rounded-xl p-4 space-y-3.5 ${strikerInspection.needs_confirmation ? 'border-amber-500/80 shadow-lg shadow-amber-950/30' : 'border-[#303438]'}`}>
+                {/* Header with Title & Detector Path Badge */}
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex items-center space-x-2 text-xs font-bold text-white">
+                    <Camera className="w-4 h-4 text-[#7FEA35]" />
                     <span>
                       {strikerInspection.needs_confirmation
-                        ? 'Could not tell who the striker is. Please select the batter'
-                        : `Multiple People Detected (${strikerInspection.candidates.length})`}
+                        ? 'Confirm Batting Striker'
+                        : `Striker Locked (${strikerInspection.candidates?.length || 0} People Detected)`}
                     </span>
                   </div>
-                  <span className="text-[10px] font-mono text-[#A5A9AD]">Tap the striker to lock tracking</span>
+
+                  {/* Which Path Ran: Roboflow or Fallback */}
+                  <div className="flex items-center space-x-2">
+                    {strikerInspection.detection_source === 'roboflow' ? (
+                      <span className="px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 text-[10px] font-mono">
+                        ✓ Roboflow RF-DETR Active ({strikerInspection.roboflow_calls_used || 1} API calls)
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-[10px] font-mono">
+                        {strikerInspection.detector_status || 'degraded: detector unavailable'}
+                      </span>
+                    )}
+                  </div>
                 </div>
+
+                {/* Honest Message & Reason */}
                 <p className="text-xs text-[#A5A9AD]">
-                  {strikerInspection.needs_confirmation
-                    ? 'Two or more people scored close together. Tap or click the batter below to lock skeleton and kinematics exclusively onto them.'
-                    : 'Tap or click a candidate box on the frame or select below to ensure pose tracking remains locked exclusively onto that batter.'}
+                  {strikerInspection.confirmation_message ||
+                    (strikerInspection.needs_confirmation
+                      ? 'Striker confidence is low or multiple people are near the crease. Tap a candidate box or drag a custom box around the batter.'
+                      : 'Pose tracking is locked onto the highlighted striker. You can also drag a custom box anywhere on the frame.')}
                 </p>
 
-                {(strikerInspection.frame_0_data_url || strikerInspection.frame0_thumbnail_base64) && (
-                  <div className="relative max-w-sm mx-auto rounded-lg overflow-hidden border border-[#303438]">
-                    <img
-                      src={strikerInspection.frame_0_data_url || `data:image/jpeg;base64,${strikerInspection.frame0_thumbnail_base64}`}
-                      alt="Candidate batters"
-                      className="w-full object-cover"
-                    />
-                    {strikerInspection.candidates.map((c: any) => {
-                      const [bx1, by1, bx2, by2] = c.bbox;
-                      const isSelected = selectedTrackId === c.track_id;
-                      return (
-                        <div
-                          key={c.track_id}
-                          onClick={() => setSelectedTrackId(c.track_id)}
-                          style={{
-                            left: `${bx1 * 100}%`,
-                            top: `${by1 * 100}%`,
-                            width: `${(bx2 - bx1) * 100}%`,
-                            height: `${(by2 - by1) * 100}%`,
-                          }}
-                          className={`absolute border-2 cursor-pointer transition-all flex items-start justify-start p-1 ${
-                            isSelected
-                              ? 'border-[#7FEA35] bg-[#7FEA35]/25 shadow-lg'
-                              : 'border-white/60 bg-black/20 hover:border-amber-400'
+                {/* Camera Perspective Warning (e.g. Behind Bowler) */}
+                {strikerInspection.camera_warning && (
+                  <div className="p-2.5 rounded-lg bg-amber-500/10 border border-amber-500/30 text-[11px] text-amber-200 flex items-start space-x-2">
+                    <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                    <span>{strikerInspection.camera_warning}</span>
+                  </div>
+                )}
+
+                {/* Frame Scrubber (Frame 0, 5, 10, 15, 20) */}
+                {strikerInspection.scrub_frames && strikerInspection.scrub_frames.length > 1 && (
+                  <div className="flex items-center space-x-2 pt-1 pb-1">
+                    <span className="text-[10px] font-mono uppercase text-[#A5A9AD]">Scrub Frame:</span>
+                    <div className="flex space-x-1.5">
+                      {strikerInspection.scrub_frames.map((sf: any, idx: number) => (
+                        <button
+                          key={sf.frame_idx}
+                          type="button"
+                          onClick={() => setScrubIndex(idx)}
+                          className={`px-2 py-0.5 rounded text-[10px] font-mono transition-colors ${
+                            scrubIndex === idx
+                              ? 'bg-[#7FEA35] text-black font-bold'
+                              : 'bg-[#181B1D] text-[#A5A9AD] hover:text-white border border-[#303438]'
                           }`}
                         >
-                          <span className={`text-[10px] font-mono px-1 py-0.5 rounded font-bold ${
-                            isSelected ? 'bg-[#7FEA35] text-black' : 'bg-black/75 text-white'
-                          }`}>
-                            {c.is_suggested_striker ? '★ Striker' : `Person ${c.track_id}`}
+                          F{sf.frame_idx}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Interactive Frame Canvas with Click/Drag Box Selection */}
+                {(() => {
+                  const activeImgUrl =
+                    (strikerInspection.scrub_frames && strikerInspection.scrub_frames[scrubIndex]?.data_url) ||
+                    strikerInspection.frame_0_data_url ||
+                    (strikerInspection.frame0_thumbnail_base64 && `data:image/jpeg;base64,${strikerInspection.frame0_thumbnail_base64}`);
+
+                  if (!activeImgUrl) return null;
+
+                  return (
+                    <div className="flex flex-col sm:flex-row gap-4 items-start">
+                      <div
+                        className="relative max-w-sm w-full mx-auto sm:mx-0 rounded-lg overflow-hidden border border-[#303438] cursor-crosshair select-none bg-black"
+                        onMouseDown={(e) => {
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                          const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                          setDragStart({ x, y });
+                          setCurrentDrag({ x, y });
+                          setIsDrawingBox(true);
+                        }}
+                        onMouseMove={(e) => {
+                          if (!isDrawingBox) return;
+                          const rect = e.currentTarget.getBoundingClientRect();
+                          const x = Math.max(0, Math.min(1, (e.clientX - rect.left) / rect.width));
+                          const y = Math.max(0, Math.min(1, (e.clientY - rect.top) / rect.height));
+                          setCurrentDrag({ x, y });
+                        }}
+                        onMouseUp={() => {
+                          if (!dragStart || !currentDrag) {
+                            setIsDrawingBox(false);
+                            return;
+                          }
+                          const dx = Math.abs(currentDrag.x - dragStart.x);
+                          const dy = Math.abs(currentDrag.y - dragStart.y);
+                          if (dx > 0.02 && dy > 0.02) {
+                            const x1 = Math.min(dragStart.x, currentDrag.x);
+                            const y1 = Math.min(dragStart.y, currentDrag.y);
+                            const x2 = Math.max(dragStart.x, currentDrag.x);
+                            const y2 = Math.max(dragStart.y, currentDrag.y);
+                            setManualBox([x1, y1, x2, y2]);
+                            setSelectedTrackId(null);
+                          } else {
+                            // Clicked a single point: create default batter box centered at point
+                            const cx = dragStart.x;
+                            const cy = dragStart.y;
+                            setManualBox([
+                              Math.max(0, cx - 0.075),
+                              Math.max(0, cy - 0.175),
+                              Math.min(1, cx + 0.075),
+                              Math.min(1, cy + 0.175),
+                            ]);
+                            setSelectedTrackId(null);
+                          }
+                          setIsDrawingBox(false);
+                          setDragStart(null);
+                          setCurrentDrag(null);
+                        }}
+                      >
+                        <img
+                          src={activeImgUrl}
+                          alt="Video frame"
+                          className="w-full object-contain pointer-events-none"
+                        />
+
+                        {/* Detector / Pose Candidates */}
+                        {(!manualBox) && strikerInspection.candidates?.map((c: any) => {
+                          const [bx1, by1, bx2, by2] = c.bbox;
+                          const isSelected = selectedTrackId === c.track_id;
+                          return (
+                            <div
+                              key={c.track_id}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                setSelectedTrackId(c.track_id);
+                                setManualBox(null);
+                              }}
+                              style={{
+                                left: `${bx1 * 100}%`,
+                                top: `${by1 * 100}%`,
+                                width: `${(bx2 - bx1) * 100}%`,
+                                height: `${(by2 - by1) * 100}%`,
+                              }}
+                              className={`absolute border-2 cursor-pointer transition-all flex items-start justify-start p-0.5 ${
+                                isSelected
+                                  ? 'border-[#7FEA35] bg-[#7FEA35]/25 shadow-lg'
+                                  : 'border-white/50 bg-black/20 hover:border-amber-400'
+                              }`}
+                            >
+                              <span className={`text-[9px] font-mono px-1 py-0.2 rounded font-bold ${
+                                isSelected ? 'bg-[#7FEA35] text-black' : 'bg-black/75 text-white'
+                              }`}>
+                                {c.is_default ? '★ Striker' : (c.class_name || `P${c.track_id}`)}
+                              </span>
+                            </div>
+                          );
+                        })}
+
+                        {/* Live Drawing Box */}
+                        {isDrawingBox && dragStart && currentDrag && (
+                          <div
+                            style={{
+                              left: `${Math.min(dragStart.x, currentDrag.x) * 100}%`,
+                              top: `${Math.min(dragStart.y, currentDrag.y) * 100}%`,
+                              width: `${Math.abs(currentDrag.x - dragStart.x) * 100}%`,
+                              height: `${Math.abs(currentDrag.y - dragStart.y) * 100}%`,
+                            }}
+                            className="absolute border-2 border-dashed border-[#7FEA35] bg-[#7FEA35]/20 pointer-events-none"
+                          />
+                        )}
+
+                        {/* Confirmed Manual Box */}
+                        {manualBox && (
+                          <div
+                            style={{
+                              left: `${manualBox[0] * 100}%`,
+                              top: `${manualBox[1] * 100}%`,
+                              width: `${(manualBox[2] - manualBox[0]) * 100}%`,
+                              height: `${(manualBox[3] - manualBox[1]) * 100}%`,
+                            }}
+                            className="absolute border-2 border-[#7FEA35] bg-[#7FEA35]/30 shadow-lg flex items-start justify-between p-1"
+                          >
+                            <span className="text-[9px] font-mono px-1 py-0.5 rounded font-bold bg-[#7FEA35] text-black">
+                              ★ Custom Batter
+                            </span>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Zoomed Crop Preview */}
+                      {manualBox && (
+                        <div className="bg-[#181B1D] border border-[#303438] rounded-xl p-3 space-y-2 flex flex-col items-center shrink-0">
+                          <span className="text-[10px] font-mono text-[#A5A9AD] uppercase font-bold">
+                            Zoomed Batter Crop
                           </span>
+                          <div className="w-28 h-36 rounded-lg overflow-hidden border border-[#7FEA35]/60 bg-black relative">
+                            <img
+                              src={activeImgUrl}
+                              alt="Crop preview"
+                              style={{
+                                position: 'absolute',
+                                left: `-${(manualBox[0] / Math.max(0.01, manualBox[2] - manualBox[0])) * 100}%`,
+                                top: `-${(manualBox[1] / Math.max(0.01, manualBox[3] - manualBox[1])) * 100}%`,
+                                width: `${(1 / Math.max(0.01, manualBox[2] - manualBox[0])) * 100}%`,
+                                height: `${(1 / Math.max(0.01, manualBox[3] - manualBox[1])) * 100}%`,
+                                maxWidth: 'none',
+                              }}
+                            />
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setManualBox(null);
+                              setSelectedTrackId(strikerInspection.default_track_id);
+                            }}
+                            className="text-[10px] font-mono text-rose-400 hover:text-rose-300 underline"
+                          >
+                            Reset to automatic
+                          </button>
                         </div>
+                      )}
+                    </div>
+                  );
+                })()}
+
+                {/* Candidate Selection Pills */}
+                {strikerInspection.candidates && strikerInspection.candidates.length > 0 && (
+                  <div className="flex flex-wrap gap-2 pt-1">
+                    {strikerInspection.candidates.map((c: any) => {
+                      const isSel = (!manualBox && selectedTrackId === c.track_id);
+                      return (
+                        <button
+                          key={c.track_id}
+                          type="button"
+                          onClick={() => {
+                            setSelectedTrackId(c.track_id);
+                            setManualBox(null);
+                          }}
+                          className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${
+                            isSel
+                              ? 'bg-[#7FEA35] text-black border-[#7FEA35]'
+                              : 'bg-[#181B1D] text-[#F5F5F5] border-[#303438] hover:border-[#7FEA35]'
+                          }`}
+                        >
+                          {isSel ? '★ ' : ''}
+                          {c.class_name ? c.class_name.replace('_', ' ').toUpperCase() : `PERSON ${c.track_id}`}
+                          {c.striker_score != null && ` (${Math.round(c.striker_score * 100)}%)`}
+                          {c.is_small_target && ' [Distant]'}
+                        </button>
                       );
                     })}
                   </div>
                 )}
-
-                <div className="flex flex-wrap gap-2 pt-1">
-                  {strikerInspection.candidates.map((c: any) => (
-                    <button
-                      key={c.track_id}
-                      type="button"
-                      onClick={() => setSelectedTrackId(c.track_id)}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-bold border transition-all cursor-pointer ${
-                        selectedTrackId === c.track_id
-                          ? 'bg-[#7FEA35] text-black border-[#7FEA35]'
-                          : 'bg-[#181B1D] text-[#F5F5F5] border-[#303438] hover:border-[#7FEA35]'
-                      }`}
-                    >
-                      {c.is_suggested_striker ? '★ ' : ''}Person {c.track_id} (Score: {c.striker_score != null ? Math.round(c.striker_score * 100) + '%' : c.wrist_motion_score})
-                    </button>
-                  ))}
-                </div>
               </div>
             )}
             <div className="bg-navy-900/80 p-6 rounded-2xl border border-navy-800 space-y-5">
