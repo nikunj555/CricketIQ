@@ -104,6 +104,7 @@ async def upload_video(
                 parsed_striker_track_id = None
 
     # Fail fast if server AI engine is not ready
+    pose_service.ensure_loaded()
     if pose_service.landmarker is None:
         raise HTTPException(
             status_code=503,

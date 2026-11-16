@@ -26,7 +26,7 @@ function resolveApiBase(): string {
   let base = envUrl;
   if (!base) {
     if (isVercelHost) {
-      base = 'https://cricketiq-1-ekqx.onrender.com/api';
+      base = 'https://cricketiq-v17s.onrender.com/api';
     } else if (typeof window !== 'undefined') {
       base = `${window.location.origin}/api`;
     } else {

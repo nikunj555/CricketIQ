@@ -393,3 +393,65 @@ CricketIQ does **not** claim to diagnose physical injuries or certify absolute c
 3. Lugaresi, C., et al. (2019). *MediaPipe: A Framework for Building Perception Pipelines*. arXiv:1906.08172.
 4. Müller, M. (2007). *Dynamic Time Warping*. Information Retrieval for Music and Motion, Springer.
 5. Hochreiter, S., & Schmidhuber, J. (1997). *Long Short-Term Memory*. Neural Computation.
+
+---
+
+## 26. Cloud Deployment & Production Guidelines (Render & Vercel)
+
+### A. Render Backend Deployment (Docker Web Service)
+CricketIQ backend is deployed as a Docker Web Service on Render (`render.yaml`):
+1. **Docker Environment**: Uses `python:3.12-slim` and installs critical system graphics libraries required by MediaPipe Pose and Hand landmarkers:
+   ```bash
+   apt-get install -y --no-install-recommends libgles2 libegl1 libgl1 libglib2.0-0 ffmpeg
+   ```
+2. **Zero PyTorch Footprint**: BiLSTM temporal phase weights are exported to pure NumPy arrays (`phase_bilstm.npz`), completely removing PyTorch from production requirements. This cuts image size by > 2.5 GB and slashes runtime memory from ~470 MB to **< 280 MB idle RSS**.
+3. **Instant Port Binding & Asynchronous Warm-up**: The Uvicorn server binds the `$PORT` instantly (< 2s) so Render detects the service immediately. Models are pre-warmed in a background worker thread.
+4. **Single-Job Queue Lock**: To prevent exceeding the 512 MB memory limit, concurrent video analysis jobs are serialized with an internal queue lock (`_processing_lock`). Maximum clip length is capped at 30.0s (`max_proc_dim = 640`).
+
+### B. Render Free Tier Sleep & Keep-Alive Setup (UptimeRobot)
+Render free tier containers spin down after 15 minutes of inactivity. When a request arrives, a cold start can take 30 to 60 seconds.
+1. **Keep-Alive External Monitor**:
+   - Register a free account at [UptimeRobot](https://uptimerobot.com) or [cron-job.org](https://cron-job.org).
+   - Add a new **HTTP(s)** monitor:
+     - **URL**: `https://<your-render-app>.onrender.com/api/health` (e.g. `https://cricketiq-v17s.onrender.com/api/health`)
+     - **Monitoring Interval**: Every 5 to 10 minutes.
+     - **HTTP Method**: `HEAD` or `GET`.
+2. **Graceful Frontend Cold-Start Handling**:
+   - The frontend never marks the AI offline on an initial failed request.
+   - It polls `/api/health` with a 3-minute retry/backoff window, displaying a `"Server is waking up, this can take a minute..."` spinner.
+   - The upload button disables while `ready: false` and enables automatically as soon as `ready: true`.
+
+### C. Vercel Frontend Deployment
+Deploy the `frontend/` directory to Vercel with single-click rewrites configured in `vercel.json`:
+- `/api/:path*` ➔ `https://cricketiq-v17s.onrender.com/api/:path*`
+- `/videos/:path*` ➔ `https://cricketiq-v17s.onrender.com/videos/:path*`
+- `/thumbnails/:path*` ➔ `https://cricketiq-v17s.onrender.com/thumbnails/:path*`
+
+### D. Roboflow RF-DETR Striker Isolation Setup (Render Configuration)
+CricketIQ integrates a hosted Roboflow RF-DETR object-detection model (`cricketiq-1-rfdetr-small-t1`) trained to detect `batter`, `bowler`, `non_striker`, `bat`, `ball`, and `stumps` so **only the active striker is analysed**.
+
+#### 1. Zero Local Weights & Memory Preservation
+To strictly honor Render's 512 MB memory limit (keeping peak RSS < 450 MB):
+- **Zero local detector weights** are loaded on the server.
+- Frames are serialized to lightweight JPEG (max 640px) and dispatched to the Roboflow hosted serverless inference endpoint.
+- Inference is invoked on every 3rd frame with bounding boxes carried forward on intermediate frames.
+- A configurable hard quota cap (`ROBOFLOW_MAX_CALLS_PER_VIDEO=15`) prevents long clips from consuming API quota.
+
+#### 2. Environment Variables Configuration (Render & Local)
+Add the following variables in the **Environment** tab of your Render Web Service or in your local `.env` file (see `.env.example`):
+
+| Variable | Description | Default / Example |
+|---|---|---|
+| `ROBOFLOW_API_KEY` | Your private Roboflow API key (**NEVER** commit to Git) | `your_roboflow_api_key_here` |
+| `ROBOFLOW_MODEL_ID` | Workspace model ID for the RF-DETR detector | `nikunjs-workspace-a3ulh/cricketiq-1-rfdetr-small-t1` |
+| `ROBOFLOW_BASE_URL` | Roboflow Serverless hosted inference base URL | `https://serverless.roboflow.com` |
+| `ROBOFLOW_CONFIDENCE_THRESHOLD` | Minimum confidence score to accept detections | `0.35` |
+| `ROBOFLOW_MAX_CALLS_PER_VIDEO` | Hard quota limit on detector API calls per video | `15` |
+| `ROBOFLOW_TIMEOUT_SEC` | HTTP request timeout for hosted API calls | `8.0` |
+
+#### 3. Striker Lock & Fallback Behavior
+- **Striker Isolation**: The striker is locked by IoU temporal tracking, bat-wrist overlap verification, box size, and stumps proximity.
+- **Strict Role Filter**: `bowler` and `non_striker` are never selected as the striker.
+- **MediaPipe Crop Pose**: MediaPipe pose runs exclusively on the striker's crop bounding box (with padding), guaranteeing the bowler never receives a skeleton overlay.
+- **Graceful Fallback**: If the API key is not configured, rate-limited (HTTP 429), or experiencing network interruptions, the system marks `detector_status: "degraded: detector unavailable"` and falls back to the kinematic multi-cue tracker without crashing the upload.
+- **Manual Confirmation**: If the user confirms or taps the batter in the preview frame, the system locks to that track and skips all Roboflow API calls.

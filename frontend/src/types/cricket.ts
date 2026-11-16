@@ -216,6 +216,11 @@ export interface AnalysisResult {
   camera_view_warning?: string | null;
   striker_track_id?: number | null;
   striker_score?: number | null;
+  striker_frames_selected?: number | null;
+  striker_selection_score?: number | null;
+  detector_status?: string | null;
+  detector_api_calls?: number | null;
+  detector_message?: string | null;
   striker_selection_reason?: string | null;
   striker_candidates?: Array<{
     track_id: number;

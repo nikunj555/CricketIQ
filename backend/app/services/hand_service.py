@@ -4,9 +4,6 @@ import logging
 import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
-import mediapipe as mp
-from mediapipe.tasks import python
-from mediapipe.tasks.python import vision
 
 from backend.app.core.config import settings
 
@@ -32,14 +29,30 @@ class HandService:
     def __init__(self, model_path: Optional[Path] = None):
         self.model_path = model_path or settings.HAND_MODEL_PATH
         self.landmarker = None
-        self._init_landmarker()
+        self.init_error = None
+        self.is_loading = False
+        import threading
+        self._lock = threading.Lock()
 
-    def _init_landmarker(self):
+    def ensure_loaded(self) -> bool:
+        """Ensures the HandLandmarker is loaded once and reused across all requests."""
+        if self.landmarker is not None or self.init_error is not None:
+            return self.landmarker is not None
+        with self._lock:
+            if self.landmarker is not None:
+                return True
+            return self._init_landmarker()
+
+    def _init_landmarker(self) -> bool:
         if not self.model_path.exists():
-            logger.warning(f"Hand landmarker asset not found at {self.model_path}. Hand tracking disabled.")
-            return
+            self.init_error = f"Hand landmarker asset not found at {self.model_path}"
+            logger.error(f"CRITICAL: {self.init_error}")
+            return False
 
         try:
+            self.is_loading = True
+            from mediapipe.tasks import python
+            from mediapipe.tasks.python import vision
             with open(self.model_path, "rb") as f:
                 model_data = f.read()
             base_options = python.BaseOptions(model_asset_buffer=model_data)
@@ -51,16 +64,23 @@ class HandService:
                 min_tracking_confidence=0.40
             )
             self.landmarker = vision.HandLandmarker.create_from_options(options)
+            self.init_error = None
             logger.info("MediaPipe HandLandmarker initialized successfully.")
-        except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
-            logger.exception(f"Failed to initialize MediaPipe HandLandmarker: {e}")
+            return True
+        except Exception as e:
+            self.init_error = f"{type(e).__name__}: {str(e)}"
+            logger.error(f"CRITICAL: Failed to initialize MediaPipe HandLandmarker: {self.init_error}", exc_info=True)
             self.landmarker = None
+            return False
+        finally:
+            self.is_loading = False
 
     def detect_hands(self, bgr_frame: np.ndarray, handedness: str = "Right") -> Dict[str, Any]:
         """
         Runs hand tracking on a BGR video frame.
         Returns detailed finger kinematics, grip closure, and reliability indicators.
         """
+        self.ensure_loaded()
         fallback: Dict[str, Any] = {
             "hand_tracking_detected": False,
             "num_hands": 0,
@@ -84,6 +104,7 @@ class HandService:
                 s = 960.0 / max(h, w)
                 proc_frame = cv2.resize(bgr_frame, (int(w * s), int(h * s)), interpolation=cv2.INTER_AREA)
             rgb_frame = np.ascontiguousarray(cv2.cvtColor(proc_frame, cv2.COLOR_BGR2RGB))
+            import mediapipe as mp
             mp_image = mp.Image(image_format=mp.ImageFormat.SRGB, data=rgb_frame)
             detection = self.landmarker.detect(mp_image)
 

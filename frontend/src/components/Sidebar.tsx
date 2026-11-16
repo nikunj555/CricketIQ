@@ -87,29 +87,40 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
 }) => {
   const [copiedSession, setCopiedSession] = useState(false);
-  const [healthStatus, setHealthStatus] = useState<'healthy' | 'degraded' | 'offline' | 'checking'>('checking');
+  const [healthStatus, setHealthStatus] = useState<'healthy' | 'degraded' | 'warming_up' | 'offline' | 'checking'>('checking');
   const [healthIssues, setHealthIssues] = useState<string[]>([]);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
-  // Poll /api/health every 15s with debounce and grace counter to prevent flickering "AI Offline"
-  const consecutiveFailuresRef = useRef<number>(0);
+  // Poll /api/health with 3-minute backoff to gracefully absorb server cold starts on Render free tier
+  const firstFailureTimeRef = useRef<number | null>(null);
 
   const checkHealth = useCallback(async () => {
     const t0 = performance.now();
     try {
       const data = await api.getHealth();
       const elapsed = Math.round(performance.now() - t0);
-      consecutiveFailuresRef.current = 0;
-      setHealthStatus(data.status === 'degraded' ? 'degraded' : 'healthy');
-      setHealthIssues(data.issues || []);
+      firstFailureTimeRef.current = null;
+      if (data.status === 'warming_up' || data.ready === false) {
+        setHealthStatus('warming_up');
+        setHealthIssues(data.issues && data.issues.length > 0 ? data.issues : ['Server is warming up AI models...']);
+      } else {
+        setHealthStatus(data.status === 'degraded' ? 'degraded' : 'healthy');
+        setHealthIssues(data.issues || []);
+      }
       setLatencyMs(elapsed);
     } catch {
-      consecutiveFailuresRef.current += 1;
-      // Require 2 consecutive failed health checks before marking AI offline
-      // This absorbs single network hiccups, latency spikes, or temporary 502 spin-up cycles
-      if (consecutiveFailuresRef.current >= 2) {
+      if (firstFailureTimeRef.current === null) {
+        firstFailureTimeRef.current = Date.now();
+      }
+      const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
+      // Allow up to 3 minutes (180s) for cold start on Render before declaring offline
+      if (elapsedSec < 180) {
+        setHealthStatus('warming_up');
+        setHealthIssues(['Server is waking up, this can take a minute...']);
+        setLatencyMs(null);
+      } else {
         setHealthStatus('offline');
-        setHealthIssues(['Backend server is unreachable']);
+        setHealthIssues(['Backend server unreachable after multiple attempts.']);
         setLatencyMs(null);
       }
     }
@@ -310,6 +321,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-[#7FEA35] opacity-75" />
                     <span className="relative inline-flex rounded-full h-2 w-2 bg-[#7FEA35]" />
                   </>
+                ) : healthStatus === 'warming_up' ? (
+                  <>
+                    <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-cyan-400 opacity-75" />
+                    <span className="relative inline-flex rounded-full h-2 w-2 bg-cyan-400" />
+                  </>
                 ) : healthStatus === 'degraded' ? (
                   <>
                     <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-amber-400 opacity-75" />
@@ -327,6 +343,8 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     ? 'Checking AI...'
                     : healthStatus === 'healthy'
                     ? 'AI Online'
+                    : healthStatus === 'warming_up'
+                    ? 'Waking Up...'
                     : healthStatus === 'degraded'
                     ? 'AI Degraded'
                     : 'AI Offline'}
@@ -335,7 +353,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
             </div>
             {!collapsed && latencyMs !== null && (
               <span className={`text-[10px] font-mono font-medium ${
-                healthStatus === 'healthy' ? 'text-[#7FEA35]' : healthStatus === 'degraded' ? 'text-amber-400' : 'text-rose-400'
+                healthStatus === 'healthy' ? 'text-[#7FEA35]' : healthStatus === 'warming_up' ? 'text-cyan-400' : healthStatus === 'degraded' ? 'text-amber-400' : 'text-rose-400'
               }`}>
                 {latencyMs}ms
               </span>
@@ -344,10 +362,12 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Tooltip for issues or collapsed view */}
           <div className="absolute left-full ml-3 top-1/2 -translate-y-1/2 px-2.5 py-1.5 rounded-lg bg-[#181B1D] text-[#F5F5F5] text-xs font-medium border border-[#303438] whitespace-nowrap shadow-xl pointer-events-none opacity-0 group-hover:opacity-100 transition-opacity z-50 space-y-1">
             <div className="font-bold flex items-center space-x-1.5">
-              <span className={`w-2 h-2 rounded-full ${healthStatus === 'healthy' ? 'bg-[#7FEA35]' : healthStatus === 'degraded' ? 'bg-amber-400' : 'bg-rose-500'}`} />
+              <span className={`w-2 h-2 rounded-full ${healthStatus === 'healthy' ? 'bg-[#7FEA35]' : healthStatus === 'warming_up' ? 'bg-cyan-400' : healthStatus === 'degraded' ? 'bg-amber-400' : 'bg-rose-500'}`} />
               <span>
                 {healthStatus === 'healthy'
                   ? `AI Engine Online (${latencyMs ?? 0}ms)`
+                  : healthStatus === 'warming_up'
+                  ? 'Server is waking up (Render free tier)'
                   : healthStatus === 'degraded'
                   ? 'AI Subsystem Degraded'
                   : 'AI Backend Offline'}

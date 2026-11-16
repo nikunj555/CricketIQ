@@ -79,6 +79,27 @@ async def lifespan(app: FastAPI):
 +========================================================================+
 """
     logger.info(banner)
+
+    # Start non-blocking background model pre-warming so port binds immediately (< 2s)
+    import threading
+    def _warmup_worker():
+        logger.info("Background model warmup starting...")
+        try:
+            from backend.app.services.pose_service import pose_service
+            pose_service.ensure_loaded()
+            logger.info("PoseLandmarker pre-warmed successfully.")
+        except Exception as e:
+            logger.warning(f"Background pose warmup notice: {e}")
+        try:
+            from backend.app.services.hand_service import hand_service
+            hand_service.ensure_loaded()
+            logger.info("HandLandmarker pre-warmed successfully.")
+        except Exception as e:
+            logger.warning(f"Background hand warmup notice: {e}")
+        logger.info("Background model warmup complete.")
+
+    threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup").start()
+
     yield
     logger.info("CricketIQ Engine shutdown complete.")
 
@@ -125,7 +146,7 @@ if settings.STORAGE_DIR.exists():
 
 FRONTEND_DIST = settings.BASE_DIR.parent / "frontend" / "dist"
 
-@app.get("/")
+@app.api_route("/", methods=["GET", "HEAD"])
 def root(request: Request):
     accept = request.headers.get("accept", "")
     # If client specifically requests HTML (e.g. browser navigation) and frontend is built, serve SPA

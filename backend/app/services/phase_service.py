@@ -1,10 +1,9 @@
-import torch
 import numpy as np
 import logging
 from typing import List, Dict, Any, Tuple, Optional
 from pathlib import Path
 from backend.app.core.config import settings
-from backend.app.models.temporal_model import BiLSTMBattingPhaseClassifier
+from backend.app.models.temporal_model import NumpyBiLSTMBattingPhaseClassifier, BiLSTMBattingPhaseClassifier
 
 logger = logging.getLogger(__name__)
 
@@ -68,31 +67,35 @@ PHASE_EVIDENCE = {
 class PhaseService:
     def __init__(self, model_path: Optional[Path] = None):
         self.model_path = Path(model_path or settings.PHASE_MODEL_PATH)
-        self.model: Optional[BiLSTMBattingPhaseClassifier] = None
-        self.device = torch.device("cpu")
-        try:
-            torch.set_num_threads(1)
-            torch.set_num_interop_threads(1)
-        except (RuntimeError, ValueError, AttributeError) as th_err:
-            logger.debug(f"Could not configure torch threads: {th_err}")
+        self.npz_path = self.model_path.with_suffix(".npz")
+        self.model: Optional[Any] = None
         self._load_model()
 
     def _load_model(self):
+        # 1. Prefer ultra-lightweight pure NumPy weights (< 1 MB RAM, no PyTorch overhead)
+        if self.npz_path.exists():
+            try:
+                self.model = NumpyBiLSTMBattingPhaseClassifier(self.npz_path)
+                logger.info(f"Loaded trained NumPy BiLSTM phase model from {self.npz_path} (< 1MB RAM).")
+                return
+            except Exception as npz_err:
+                logger.warning(f"Could not load phase NPZ model: {npz_err}")
+
+        # 2. Fallback to PyTorch checkpoint if torch is available
         if self.model_path.exists():
             try:
-                model = BiLSTMBattingPhaseClassifier(
-                    input_dim=14,
-                    hidden_dim=64,
-                    num_layers=2,
-                    num_classes=len(PHASE_LABELS)
-                )
-                state_dict = torch.load(self.model_path, map_location=self.device, weights_only=True)
-                model.load_state_dict(state_dict)
-                model.eval()
-                self.model = model
-                logger.info(f"Loaded trained BiLSTM phase model from {self.model_path}")
-            except (torch.jit.Error, RuntimeError, FileNotFoundError, OSError, KeyError, ValueError) as e:
-                logger.warning(f"Could not load phase model weights: {e}. Using kinematic phase detector.")
+                import torch
+                state_dict = torch.load(self.model_path, map_location="cpu", weights_only=True)
+                npz_dict = {k: v.cpu().numpy() for k, v in state_dict.items()}
+                self.model = NumpyBiLSTMBattingPhaseClassifier(npz_dict)
+                # Auto-cache NPZ for future instant loads
+                try:
+                    np.savez_compressed(self.npz_path, **npz_dict)
+                except Exception:
+                    pass
+                logger.info(f"Loaded trained BiLSTM phase weights from {self.model_path} via NumPy bridge.")
+            except Exception as e:
+                logger.warning(f"Could not load phase model weights: {e}. Fallback to kinematic phase detector.")
                 self.model = None
         else:
             logger.info("No pretrained BiLSTM phase model weights found. Fallback to kinematic phase detector.")

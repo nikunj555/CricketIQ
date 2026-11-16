@@ -33,6 +33,31 @@ export const UploadPage: React.FC<UploadPageProps> = ({
   const [strikerInspection, setStrikerInspection] = useState<any>(null);
   const [selectedTrackId, setSelectedTrackId] = useState<number | null>(null);
   const [isInspecting, setIsInspecting] = useState<boolean>(false);
+  const [serverReady, setServerReady] = useState<boolean>(true);
+  const [isServerWarmingUp, setIsServerWarmingUp] = useState<boolean>(false);
+
+  useEffect(() => {
+    let mounted = true;
+    const checkServer = async () => {
+      try {
+        const h = await api.getHealth();
+        if (!mounted) return;
+        const ready = h.ready !== false && h.status !== 'warming_up' && h.status !== 'offline';
+        setServerReady(ready);
+        setIsServerWarmingUp(h.status === 'warming_up' || (!ready && h.status !== 'offline'));
+      } catch {
+        if (!mounted) return;
+        setServerReady(false);
+        setIsServerWarmingUp(true);
+      }
+    };
+    checkServer();
+    const interval = setInterval(checkServer, 8000);
+    return () => {
+      mounted = false;
+      clearInterval(interval);
+    };
+  }, []);
 
   useEffect(() => {
     if (initialShotType) {
@@ -522,9 +547,9 @@ export const UploadPage: React.FC<UploadPageProps> = ({
             {/* Submit CTA */}
             <button
               type="submit"
-              disabled={!selectedFile || uploading}
+              disabled={!selectedFile || uploading || !serverReady}
               className={`w-full py-3.5 rounded-xl font-bold text-xs sm:text-sm flex items-center justify-center space-x-2 transition-all shadow-lg ${
-                !selectedFile || uploading
+                !selectedFile || uploading || !serverReady
                   ? 'bg-navy-800 text-slate-500 cursor-not-allowed border border-navy-700'
                   : 'bg-brand-500 hover:bg-brand-600 text-navy-950 shadow-brand-500/20 transform hover:-translate-y-0.5'
               }`}
@@ -533,6 +558,11 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                 <>
                   <Loader2 className="w-4 h-4 animate-spin" />
                   <span>Analyzing Batting Technique...</span>
+                </>
+              ) : !serverReady ? (
+                <>
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                  <span>{isServerWarmingUp ? 'Server is waking up, upload enables automatically...' : 'Waiting for AI engine initialization...'}</span>
                 </>
               ) : (
                 <>

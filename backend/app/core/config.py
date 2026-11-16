@@ -39,6 +39,14 @@ class Settings:
     HAND_MODEL_PATH: Path = BASE_DIR / "app" / "models" / "assets" / "hand_landmarker.task"
     PHASE_MODEL_PATH: Path = BASE_DIR / "app" / "models" / "assets" / "phase_bilstm.pt"
     
+    # Roboflow object detector configuration (RF-DETR hosted inference)
+    ROBOFLOW_API_KEY: str = os.getenv("ROBOFLOW_API_KEY", "").strip()
+    ROBOFLOW_MODEL_ID: str = os.getenv("ROBOFLOW_MODEL_ID", "nikunjs-workspace-a3ulh/cricketiq-1-rfdetr-small-t1").strip()
+    ROBOFLOW_BASE_URL: str = os.getenv("ROBOFLOW_BASE_URL", "https://serverless.roboflow.com").rstrip("/")
+    ROBOFLOW_CONFIDENCE_THRESHOLD: float = float(os.getenv("ROBOFLOW_CONFIDENCE_THRESHOLD", "0.35"))
+    ROBOFLOW_MAX_CALLS_PER_VIDEO: int = int(os.getenv("ROBOFLOW_MAX_CALLS_PER_VIDEO", "15"))
+    ROBOFLOW_TIMEOUT_SEC: float = float(os.getenv("ROBOFLOW_TIMEOUT_SEC", "8.0"))
+
     # Feature flags & validation gates
     ENABLE_EXPERIMENTAL_BAT_BALL: bool = os.getenv("ENABLE_EXPERIMENTAL_BAT_BALL", "false").lower() == "true"
     ENABLE_HAND_LANDMARKER: bool = os.getenv("ENABLE_HAND_LANDMARKER", "false").lower() == "true"
@@ -49,8 +57,8 @@ class Settings:
     # Upload limits
     MAX_UPLOAD_SIZE_MB: int = int(os.getenv("MAX_UPLOAD_SIZE_MB", "150"))
     ALLOWED_EXTENSIONS: set = {".mp4", ".mov", ".avi", ".webm", ".mkv", ".m4v"}
-    MAX_FRAMES_TO_PROCESS: int = int(os.getenv("MAX_FRAMES_TO_PROCESS", "1800"))
-    MAX_VIDEO_DURATION_SEC: float = float(os.getenv("MAX_VIDEO_DURATION_SEC", "60.0"))
+    MAX_FRAMES_TO_PROCESS: int = int(os.getenv("MAX_FRAMES_TO_PROCESS", "900"))
+    MAX_VIDEO_DURATION_SEC: float = float(os.getenv("MAX_VIDEO_DURATION_SEC", "30.0"))
     DEFAULT_SAMPLE_RATE: int = 1       # 1 = every frame
     
     # CORS

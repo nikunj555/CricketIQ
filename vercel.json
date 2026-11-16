@@ -1,20 +1,17 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
-  "installCommand": "cd frontend && npm install",
-  "buildCommand": "cd frontend && npm run build",
-  "outputDirectory": "frontend/dist",
   "rewrites": [
     {
       "source": "/api/:path*",
-      "destination": "https://cricketiq-1-ekqx.onrender.com/api/:path*"
+      "destination": "https://cricketiq-v17s.onrender.com/api/:path*"
     },
     {
       "source": "/videos/:path*",
-      "destination": "https://cricketiq-1-ekqx.onrender.com/videos/:path*"
+      "destination": "https://cricketiq-v17s.onrender.com/videos/:path*"
     },
     {
       "source": "/thumbnails/:path*",
-      "destination": "https://cricketiq-1-ekqx.onrender.com/thumbnails/:path*"
+      "destination": "https://cricketiq-v17s.onrender.com/thumbnails/:path*"
     },
     {
       "source": "/(.*)",

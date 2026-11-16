@@ -498,24 +498,37 @@ class MultiPersonTracker:
         return best_tid, classifications, needs_confirmation, confirmation_message
 
 
+import threading
+
 class PoseService:
     def __init__(self, model_asset_path: Optional[Path] = None):
         self.model_asset_path = str(model_asset_path or settings.MODEL_ASSET_PATH)
         self.landmarker = None
         self.crop_landmarker = None
         self.init_error = None
-        self._init_landmarker()
+        self.is_loading = False
+        self._lock = threading.Lock()
 
-    def _init_landmarker(self):
+    def ensure_loaded(self):
+        """Ensures the PoseLandmarker model is loaded once and reused across all requests."""
+        if self.landmarker is not None or self.init_error is not None:
+            return self.landmarker is not None
+        with self._lock:
+            if self.landmarker is not None:
+                return True
+            return self._init_landmarker()
+
+    def _init_landmarker(self) -> bool:
         try:
+            self.is_loading = True
             import mediapipe as mp
             from mediapipe.tasks.python import vision, BaseOptions
 
             p = Path(self.model_asset_path).resolve()
             if not p.exists():
                 self.init_error = f"PoseLandmarker asset not found at {self.model_asset_path}"
-                logger.warning(f"PoseLandmarker asset not found at {self.model_asset_path}. Pose estimation disabled until asset downloaded.")
-                return
+                logger.error(f"CRITICAL: PoseLandmarker asset not found at {self.model_asset_path}.")
+                return False
 
             with open(p, "rb") as f:
                 model_data = f.read()
@@ -534,11 +547,14 @@ class PoseService:
 
             self.init_error = None
             logger.info("MediaPipe Multi-PoseLandmarker (num_poses=4, lightweight memory profile) initialized successfully.")
-        except (RuntimeError, ValueError, FileNotFoundError, OSError) as e:
+            return True
+        except Exception as e:
             self.init_error = f"{type(e).__name__}: {str(e)}"
-            logger.exception(f"Failed to initialize PoseLandmarker: {e}")
+            logger.error(f"CRITICAL: Failed to initialize PoseLandmarker: {self.init_error}", exc_info=True)
             self.landmarker = None
-            self.crop_landmarker = None
+            return False
+        finally:
+            self.is_loading = False
 
     def detect_frame_multi(self, bgr_frame: np.ndarray, run_crop_pose: bool = False) -> List[Dict[str, Any]]:
         """
@@ -546,6 +562,7 @@ class PoseService:
         Extracts 33 landmarks, world landmarks, and bounding boxes for all detected persons.
         Optimized for < 250MB RAM footprint on cloud containers (e.g. Render free tier).
         """
+        self.ensure_loaded()
         if self.landmarker is None or bgr_frame is None:
             return []
 
@@ -590,6 +607,71 @@ class PoseService:
         if multi:
             return multi[0]["landmarks"]
         return None
+
+    def detect_crop(
+        self,
+        bgr_frame: np.ndarray,
+        bbox_norm: List[float],
+        padding_pct: float = 0.15
+    ) -> Tuple[Optional[List[Dict[str, Any]]], Optional[List[Any]]]:
+        """
+        Runs MediaPipe pose ONLY on the striker's crop (with padding).
+        Remaps landmarks from crop coordinates back to normalized full-frame coordinates.
+        This ensures bowlers and fielders outside the crop are never picked up.
+        """
+        self.ensure_loaded()
+        if self.landmarker is None or bgr_frame is None or not bbox_norm or len(bbox_norm) < 4:
+            return None, None
+
+        h, w = bgr_frame.shape[:2]
+        bw = (bbox_norm[2] - bbox_norm[0])
+        bh = (bbox_norm[3] - bbox_norm[1])
+        pad_x = bw * padding_pct * w
+        pad_y = bh * padding_pct * h
+
+        x1 = max(0, int(round(bbox_norm[0] * w - pad_x)))
+        y1 = max(0, int(round(bbox_norm[1] * h - pad_y)))
+        x2 = min(w, int(round(bbox_norm[2] * w + pad_x)))
+        y2 = min(h, int(round(bbox_norm[3] * h + pad_y)))
+
+        if x2 - x1 < 25 or y2 - y1 < 25:
+            return None, None
+
+        crop_bgr = bgr_frame[y1:y2, x1:x2]
+        crop_h, crop_w = crop_bgr.shape[:2]
+
+        crop_poses = self.detect_frame_multi(crop_bgr)
+        if not crop_poses:
+            return None, None
+
+        # Take largest detected pose inside the crop
+        best_pose = crop_poses[0]
+        lms = best_pose["landmarks"]
+        world_lms = best_pose.get("world_landmarks")
+
+        if not lms or len(lms) < 33:
+            return None, None
+
+        # Remap crop landmarks [0, 1] relative to crop back to [0, 1] of full frame
+        remapped_landmarks = []
+        for lm in lms:
+            lx = getattr(lm, "x", lm.get("x", 0.0) if isinstance(lm, dict) else 0.0)
+            ly = getattr(lm, "y", lm.get("y", 0.0) if isinstance(lm, dict) else 0.0)
+            lz = getattr(lm, "z", lm.get("z", 0.0) if isinstance(lm, dict) else 0.0)
+            lv = getattr(lm, "visibility", lm.get("visibility", 1.0) if isinstance(lm, dict) else 1.0)
+
+            full_x = (x1 + lx * crop_w) / float(w)
+            full_y = (y1 + ly * crop_h) / float(h)
+            full_z = lz * (crop_w / float(w))
+
+            remapped_landmarks.append({
+                "x": round(float(full_x), 4),
+                "y": round(float(full_y), 4),
+                "z": round(float(full_z), 4),
+                "visibility": round(float(lv), 2)
+            })
+
+        return remapped_landmarks, world_lms
 
     def inspect_strikers(self, video_path: Path, max_scan_frames: int = 90) -> Dict[str, Any]:
         """

@@ -18,14 +18,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /app
 
-# Upgrade pip and install lightweight CPU-only PyTorch first (saves ~3GB of CUDA/NVIDIA memory overhead)
-RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
-
-# Install remaining Python dependencies (excluding torch which is already installed as CPU-only)
+# Upgrade pip and install lightweight Python dependencies (Zero PyTorch - pure NumPy BiLSTM inference)
 COPY backend/requirements.txt ./backend/requirements.txt
-RUN grep -v "^torch" ./backend/requirements.txt > ./backend/requirements-notorch.txt && \
-    pip install --no-cache-dir -r ./backend/requirements-notorch.txt
+RUN pip install --no-cache-dir --upgrade pip && \
+    pip install --no-cache-dir -r ./backend/requirements.txt
 
 # Copy application source code
 COPY . .

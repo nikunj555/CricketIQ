@@ -130,9 +130,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <span className="text-[11px] uppercase tracking-wider text-[#A5A9AD] font-bold">
                 Practice Readiness
               </span>
-              <span className={`inline-flex items-center space-x-1 ${healthInfo?.status === 'healthy' ? 'text-[#7FEA35]' : 'text-rose-400'}`}>
-                <span className={`w-2 h-2 rounded-full ${healthInfo?.status === 'healthy' ? 'bg-[#7FEA35] animate-pulse' : 'bg-rose-500'}`} />
-                <span>{healthInfo?.status === 'healthy' ? 'Ready' : (healthInfo ? 'Degraded' : 'Offline')}</span>
+              <span className={`inline-flex items-center space-x-1 ${healthInfo?.ready ? 'text-[#7FEA35]' : healthInfo?.status === 'warming_up' ? 'text-cyan-400' : 'text-amber-400'}`}>
+                <span className={`w-2 h-2 rounded-full ${healthInfo?.ready ? 'bg-[#7FEA35] animate-pulse' : healthInfo?.status === 'warming_up' ? 'bg-cyan-400 animate-ping' : 'bg-amber-400'}`} />
+                <span>{healthInfo?.ready ? 'Ready' : (healthInfo?.status === 'warming_up' ? 'Waking Up...' : (healthInfo ? 'Degraded' : 'Checking...'))}</span>
               </span>
             </div>
             <div className="space-y-1.5 text-[11px] text-[#A5A9AD]">
@@ -143,9 +143,9 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
               <div className="flex items-center justify-between">
                 <span>Kinematic Models:</span>
                 <span className="text-[#F5F5F5]">
-                  {healthInfo?.models?.pose_estimator?.loaded
+                  {healthInfo?.models?.pose?.loaded || healthInfo?.models?.pose_estimator?.loaded
                     ? 'Pose + Kinematics'
-                    : healthInfo ? 'Checking Models' : 'Offline'}
+                    : healthInfo?.status === 'warming_up' ? 'Warming Up Models...' : healthInfo ? 'Checking Models' : 'Initializing...'}
                 </span>
               </div>
               <div className="flex items-center justify-between">

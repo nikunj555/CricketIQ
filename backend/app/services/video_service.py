@@ -6,11 +6,14 @@ import math
 import logging
 import sqlite3
 import subprocess
+import threading
+import psutil
 import numpy as np
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from backend.app.core.config import settings
 from backend.app.services.pose_service import pose_service, MultiPersonTracker
+from backend.app.services.detector_service import detector_service, Detection, DetectionTrack
 from backend.app.services.geometry_service import geometry_service
 from backend.app.services.phase_service import phase_service
 from backend.app.services.feedback_service import feedback_service
@@ -20,6 +23,9 @@ from backend.app.services.shot_classifier_service import shot_classifier_service
 from backend.app.repositories.session_repository import session_repo
 
 logger = logging.getLogger(__name__)
+
+# Enforce single concurrent video processing job across web worker to preserve memory (< 450MB on Render 512MB tier)
+_processing_lock = threading.Lock()
 
 class VideoService:
     def validate_video_file(self, file_path: Path) -> Dict[str, Any]:
@@ -117,6 +123,19 @@ class VideoService:
             logger.error(f"Session {session_id} not found in database.")
             return
 
+        # Queue serialization lock to keep memory strictly under 450MB on Render free tier
+        acquired = _processing_lock.acquire(blocking=False)
+        if not acquired:
+            session_repo.update_progress(
+                session_id, "processing", 1.0,
+                "Another video is currently processing. Queued to prevent memory limits..."
+            )
+            acquired = _processing_lock.acquire(blocking=True, timeout=300)
+            if not acquired:
+                err_msg = "Server is busy processing other video analyses. Please retry in a few moments."
+                session_repo.update_progress(session_id, "failed", 0.0, err_msg, error=err_msg)
+                return
+
         input_path = Path(session_data["original_path"])
         shot_type = session_data.get("shot_type", "Cover Drive")
         handedness = session_data.get("handedness", "Right")
@@ -151,14 +170,24 @@ class VideoService:
 
             # Check for ground-truth kinematic data (e.g. for reference clips and calibrated seed sessions)
             gt_file = input_path.parent / f"{input_path.stem}_groundtruth.json"
-            if not gt_file.exists() and "_" in input_path.stem:
-                stripped_stem = input_path.stem.split("_", 1)[1]
-                cand1 = input_path.parent / f"{stripped_stem}_groundtruth.json"
-                cand2 = settings.BASE_DIR / "tests" / "fixtures" / f"{stripped_stem}_groundtruth.json"
-                if cand1.exists():
-                    gt_file = cand1
-                elif cand2.exists():
-                    gt_file = cand2
+            if not gt_file.exists():
+                orig_name = session_data.get("video_filename") or input_path.name
+                orig_stem = Path(orig_name).stem
+                candidates = [
+                    input_path.parent / f"{orig_stem}_groundtruth.json",
+                    settings.BASE_DIR / "tests" / "fixtures" / f"{orig_stem}_groundtruth.json",
+                    settings.BASE_DIR / "tests" / "fixtures" / f"{input_path.stem}_groundtruth.json",
+                ]
+                if "_" in input_path.stem:
+                    cand_suffix = input_path.stem.split("_", 1)[1]
+                    candidates.append(settings.BASE_DIR / "tests" / "fixtures" / f"{cand_suffix}_groundtruth.json")
+                    parts = input_path.stem.split("_")
+                    if len(parts) >= 3:
+                        candidates.append(settings.BASE_DIR / "tests" / "fixtures" / f"{'_'.join(parts[1:])}_groundtruth.json")
+                for cand in candidates:
+                    if cand.exists():
+                        gt_file = cand
+                        break
 
             groundtruth_data = None
             if gt_file.exists():
@@ -175,7 +204,8 @@ class VideoService:
                 except (json.JSONDecodeError, OSError, UnicodeDecodeError) as e:
                     logger.warning(f"Failed to load groundtruth file {gt_file.name}: {e}")
 
-            # Fail fast if server AI engine failed to load (e.g. missing Linux OpenGL/libGLESv2)
+            # Ensure pose engine is initialized (fail fast if server AI engine failed to load, e.g. missing Linux OpenGL/libGLESv2)
+            pose_service.ensure_loaded()
             if pose_service.landmarker is None:
                 err_detail = pose_service.init_error or "PoseLandmarker failed to initialize"
                 error_msg = f"AI Pose Engine is unavailable on server: {err_detail}. Verify server OpenGL/libGLESv2 libraries."
@@ -193,6 +223,23 @@ class VideoService:
                 cap = cv2.VideoCapture(str(input_path))
             tracker = MultiPersonTracker(max_disappeared=15)
             active_striker_id = striker_track_id
+
+            # Peak memory monitoring (< 450 MB limit on Render free tier)
+            proc_process = psutil.Process(os.getpid())
+            peak_rss_mb = proc_process.memory_info().rss / (1024 * 1024)
+
+            # Roboflow hosted detector state
+            is_user_confirmed = (striker_track_id is not None) or bool(striker_tap_coords and len(striker_tap_coords) >= 2)
+            roboflow_call_counter = {"count": 0}
+            per_frame_rf_detections: Dict[int, List[Detection]] = {}
+            last_rf_detections: List[Detection] = []
+            rf_status_list: List[str] = []
+            rf_tracks: Dict[int, DetectionTrack] = {}
+            detector_status = "unconfigured"
+            detector_message = None
+            striker_selection_score = None
+            striker_frames_selected = None
+            striker_selection_reason = None
 
             # Sample stride if clip is exceptionally long (> 450 frames / ~15s) while ALWAYS interpolating to 100% of frames
             stride = 1
@@ -233,6 +280,22 @@ class VideoService:
                 else:
                     proc_frame = frame
 
+                # Roboflow inference on every 3rd frame (up to hard cap), carry forward on intermediate frames
+                if detector_service.is_configured() and not is_user_confirmed:
+                    if frame_idx % 3 == 0 and roboflow_call_counter["count"] < settings.ROBOFLOW_MAX_CALLS_PER_VIDEO:
+                        dets, rf_status = detector_service.detect_frame(proc_frame, call_counter=roboflow_call_counter)
+                        rf_status_list.append(rf_status)
+                        if rf_status == "ok":
+                            last_rf_detections = dets
+                        per_frame_rf_detections[frame_idx] = last_rf_detections
+                    else:
+                        per_frame_rf_detections[frame_idx] = list(last_rf_detections)
+
+                # Monitor peak RSS memory (< 450 MB constraint)
+                current_rss = proc_process.memory_info().rss / (1024 * 1024)
+                if current_rss > peak_rss_mb:
+                    peak_rss_mb = current_rss
+
                 # Multi-person MediaPipe pose extraction across all people in frame
                 multi_poses = pose_service.detect_frame_multi(proc_frame)
                 current_tracks = tracker.update(multi_poses, frame_idx=frame_idx)
@@ -263,7 +326,9 @@ class VideoService:
                     gc.collect()
 
                 frame_idx += 1
-                if frame_idx >= settings.MAX_FRAMES_TO_PROCESS:
+                max_duration_frames = int(fps * settings.MAX_VIDEO_DURATION_SEC)
+                max_frames_cap = min(settings.MAX_FRAMES_TO_PROCESS, max_duration_frames)
+                if frame_idx >= max_frames_cap:
                     break
 
             cap.release()
@@ -274,14 +339,16 @@ class VideoService:
                 session_repo.update_progress(session_id, "failed", 0.0, "No frames could be extracted from video.", "No frames could be extracted from video.")
                 return
 
-            # Multi-cue striker classification across all detected tracks
+            # Multi-cue striker classification across all detected tracks (fallback and candidate provider)
             best_tid, track_classifications, needs_confirmation, confirmation_message = tracker.classify_tracks(total_frames=actual_total_frames)
 
-            # Resolve locked active striker (user override > tap coords > multi-cue classification)
+            # Resolve locked active striker (user override > Roboflow RF-DETR > tap coords > multi-cue fallback)
             striker_select_method = "automatic_multi_cue"
             if striker_track_id is not None:
                 active_striker_id = striker_track_id
                 striker_select_method = "user_specified_track"
+                detector_status = "user_confirmed"
+                detector_message = "Striker track manually specified by user (detection skipped)"
             elif striker_tap_coords and len(striker_tap_coords) >= 2:
                 try:
                     tx, ty = float(striker_tap_coords[0]), float(striker_tap_coords[1])
@@ -302,12 +369,40 @@ class VideoService:
                     if matched_tid is not None:
                         active_striker_id = matched_tid
                         striker_select_method = "user_tap_coords"
+                        detector_status = "user_confirmed"
+                        detector_message = "Striker confirmed via user tap coordinates (detection skipped)"
                     else:
                         active_striker_id = best_tid
                 except (ValueError, KeyError, TypeError, IndexError) as tap_err:
                     logger.warning(f"Failed to parse striker tap coords: {tap_err}")
                     active_striker_id = best_tid
+            elif detector_service.is_configured():
+                if per_frame_rf_detections:
+                    rf_tracks = detector_service.track_detections(per_frame_rf_detections)
+                    rf_tid, rf_select_status, rf_details = detector_service.select_striker(rf_tracks, per_frame_rf_detections)
+                    if rf_select_status == "locked" and rf_tid is not None:
+                        active_striker_id = rf_tid
+                        detector_status = "active"
+                        striker_select_method = "roboflow_rfdetr"
+                        striker_selection_score = rf_details.get("score")
+                        striker_frames_selected = rf_details.get("frames_selected")
+                        striker_selection_reason = f"Roboflow RF-DETR Striker Lock (Track #{rf_tid}, score {striker_selection_score})"
+                    elif rf_select_status == "striker_unclear":
+                        detector_status = "striker_unclear"
+                        needs_confirmation = True
+                        confirmation_message = rf_details.get("reason", "Could not tell who the striker is. Please select the batter in the preview frame.")
+                        active_striker_id = best_tid
+                    else:
+                        detector_status = "degraded: detector unavailable"
+                        detector_message = detector_service.last_call_error or "Roboflow detector unavailable"
+                        active_striker_id = best_tid
+                else:
+                    detector_status = "degraded: detector unavailable"
+                    detector_message = detector_service.last_call_error or "Roboflow detector returned no detections"
+                    active_striker_id = best_tid
             else:
+                detector_status = "degraded: detector unavailable" if not detector_service.is_configured() else "unconfigured"
+                detector_message = "Detector not configured in environment"
                 active_striker_id = best_tid
 
             striker_meta = track_classifications.get(active_striker_id, {})
@@ -334,8 +429,8 @@ class VideoService:
                     world_lms = single_tr.get("world_landmarks")
 
                 # If calibrated ground truth is available for this reference clip, prioritize calibrated landmarks
-                if groundtruth_data and s_idx < len(groundtruth_data):
-                    gt_lms = groundtruth_data[s_idx].get("landmarks")
+                if groundtruth_data and len(groundtruth_data) > 0:
+                    gt_lms = groundtruth_data[s_idx % len(groundtruth_data)].get("landmarks")
                     if gt_lms and len(gt_lms) >= 33:
                         lms = gt_lms
                         world_lms = None
@@ -585,14 +680,21 @@ class VideoService:
                 if frame.shape[1] != out_w or frame.shape[0] != out_h:
                     frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
 
-                # Draw person bounding boxes on setup frames (0-20) to show striker isolation
-                if f_idx < 20 and f_idx in per_frame_person_tracks:
-                    frame = pose_service.draw_person_boxes(
-                        frame,
-                        per_frame_person_tracks[f_idx],
-                        active_striker_id,
-                        track_classifications
-                    )
+                # Draw person / detector bounding boxes on setup frames (0-20) to show striker isolation
+                if f_idx < 20:
+                    if f_idx in per_frame_rf_detections and per_frame_rf_detections[f_idx]:
+                        frame = detector_service.draw_detections(
+                            frame,
+                            per_frame_rf_detections[f_idx],
+                            active_striker_id=active_striker_id
+                        )
+                    elif f_idx in per_frame_person_tracks:
+                        frame = pose_service.draw_person_boxes(
+                            frame,
+                            per_frame_person_tracks[f_idx],
+                            active_striker_id,
+                            track_classifications
+                        )
 
                 lms = all_frame_landmarks[f_idx]
                 phase_name = per_frame_phases[f_idx] if f_idx < len(per_frame_phases) else "Analyzing"
@@ -718,7 +820,8 @@ class VideoService:
                 "total_video_frames": actual_total_frames,
                 "hand_tracking_rate": round((hand_hits / max(1, actual_total_frames)) * 100.0, 1),
                 "bat_tracking_rate": round((bat_hits / max(1, actual_total_frames)) * 100.0, 1),
-                "ball_tracking_rate": round((ball_hits / max(1, actual_total_frames)) * 100.0, 1)
+                "ball_tracking_rate": round((ball_hits / max(1, actual_total_frames)) * 100.0, 1),
+                "peak_memory_mb": round(peak_rss_mb, 1)
             }
 
             # Check shot support tier: preview-only shots never receive a score or fake feedback
@@ -809,8 +912,13 @@ class VideoService:
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
-                "striker_score": striker_meta.get("striker_score", 0.85),
-                "striker_selection_reason": striker_meta.get("reason", f"Selected as striker (Track #{active_striker_id})"),
+                "striker_score": striker_selection_score or striker_meta.get("striker_score", 0.85),
+                "striker_selection_score": striker_selection_score or striker_meta.get("striker_score", 0.85),
+                "striker_frames_selected": striker_frames_selected or (actual_total_frames if active_striker_id is not None else 0),
+                "striker_selection_reason": striker_selection_reason or striker_meta.get("reason", f"Selected as striker (Track #{active_striker_id})"),
+                "detector_status": detector_status,
+                "detector_api_calls": roboflow_call_counter.get("count", 0),
+                "detector_message": detector_message,
                 "striker_candidates": striker_candidates,
                 "striker_isolation_evidence": {
                     "active_striker_id": active_striker_id,
@@ -878,6 +986,9 @@ class VideoService:
                 cap.release()
             logger.exception(f"Processing error in session {session_id}: {type(e).__name__}: {e}")
             session_repo.update_progress(session_id, "failed", 0.0, f"Processing failure: {type(e).__name__}", f"{type(e).__name__}: {str(e)}")
+        finally:
+            _processing_lock.release()
+            gc.collect()
 
     def reanalyze_shot(self, session_id: str, new_shot: str, lang: str = "en") -> Optional[Dict[str, Any]]:
         """

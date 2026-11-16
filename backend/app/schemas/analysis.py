@@ -148,7 +148,12 @@ class AnalysisResult(BaseModel):
     shot_mismatch_warning: Optional[str] = None
     striker_track_id: Optional[int] = None
     striker_score: Optional[float] = None
+    striker_selection_score: Optional[float] = None
+    striker_frames_selected: Optional[int] = None
     striker_selection_reason: Optional[str] = None
+    detector_status: Optional[str] = None
+    detector_api_calls: Optional[int] = None
+    detector_message: Optional[str] = None
     striker_candidates: Optional[List[Dict[str, Any]]] = None
     striker_isolation_evidence: Optional[Dict[str, Any]] = None
     striker_tracking_status: Optional[str] = None
