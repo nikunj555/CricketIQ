@@ -28,7 +28,7 @@ class Settings:
     PORT: int = int(os.getenv("PORT", "8000"))
     
     # Storage directories
-    STORAGE_DIR: Path = ROOT_DIR / "storage"
+    STORAGE_DIR: Path = Path(os.getenv("STORAGE_DIR", str(ROOT_DIR / "storage")))
     UPLOADS_DIR: Path = STORAGE_DIR / "uploads"
     ANNOTATED_DIR: Path = STORAGE_DIR / "annotated"
     THUMBNAILS_DIR: Path = STORAGE_DIR / "thumbnails"

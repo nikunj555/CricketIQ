@@ -35,7 +35,8 @@ def get_model_evaluation_report() -> Dict[str, Any]:
     data = report.model_dump() if hasattr(report, "model_dump") else report.dict()
     data["has_empirical_data"] = True
     data["benchmark_type"] = "synthetic_benchmark"
-    data["benchmark_label"] = "Synthetic Benchmark (Calibrated Kinematic Sequences)"
+    data["benchmark_label"] = "Synthetic Benchmark (measured on synthetic data)"
+    data["accuracy_disclaimer"] = "Performance metrics measured on synthetic data"
     data["labeled_clips_count"] = clip_count
     data["min_required_per_shot"] = settings.MIN_CLIPS_FOR_SUPPORTED_SHOT
     return data

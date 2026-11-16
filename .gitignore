@@ -28,6 +28,9 @@ wheels/
 *.egg
 .pytest_cache/
 *.db
+*.db-*
+*.sqlite
+*.sqlite3
 
 # Storage
 storage/uploads/*
@@ -38,7 +41,7 @@ storage/annotated/*
 storage/thumbnails/*
 !storage/thumbnails/.gitkeep
 storage/scratch/*
-storage/*.db
+storage/*.db*
 
 # Node / Frontend
 node_modules/

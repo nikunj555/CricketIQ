@@ -350,16 +350,12 @@ class ShotClassifierService:
         # =========================================================================
 
         # 1. Sweep Family Gate:
-        # "A sweep requires both a low hip and a horizontal, low bat path.
-        # If the bat path is vertical and the back leg is planted, the shot cannot be a sweep,
-        # whatever the knee angles say."
-        is_sweep_candidate = (
-            (rear_knee_gnd <= 0.26 and min_rear_knee <= 118.0) or
-            ((hip_drop >= 0.18 or max_hip_drop >= 0.22) and min_rear_knee <= 118.0 and
-             (horiz_bat_ratio >= 0.35 or abs(impact_bat_ang) >= 38.0 or horiz_ratio >= 0.40 or w_span_x >= 0.50))
-        )
-        if rear_knee_gnd >= 0.32 and min_rear_knee >= 125.0:
-            is_sweep_candidate = False
+        # A sweep requires BOTH a low hip/knee AND a horizontal, low bat path.
+        # If the bat path is vertical or rear leg is planted/extended, the shot CANNOT be a sweep,
+        # whatever the knee angles say.
+        has_horizontal_bat = (horiz_bat_ratio >= 0.30 or abs(impact_bat_ang) >= 35.0 or horiz_ratio >= 0.35 or w_span_x >= 0.45)
+        has_low_body = (rear_knee_gnd <= 0.26 or min_rear_knee <= 118.0 or hip_drop >= 0.18 or max_hip_drop >= 0.22)
+        is_sweep_candidate = bool(has_low_body and has_horizontal_bat and not (rear_knee_gnd >= 0.32 and min_rear_knee >= 125.0))
 
         peak_speed = feat_dict.get("peak_wrist_speed", 0.05)
 

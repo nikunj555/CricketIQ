@@ -22,7 +22,8 @@ WORKDIR /app
 # Upgrade pip and install lightweight Python dependencies (Zero PyTorch - pure NumPy BiLSTM inference)
 COPY backend/requirements.txt ./backend/requirements.txt
 RUN pip install --no-cache-dir --upgrade pip && \
-    pip install --no-cache-dir -r ./backend/requirements.txt
+    pip install --no-cache-dir -r ./backend/requirements.txt && \
+    pip uninstall -y opencv-contrib-python matplotlib || true
 
 # Copy application source code
 COPY . .

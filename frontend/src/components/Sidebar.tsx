@@ -93,6 +93,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
   // Poll /api/health with backoff to gracefully absorb server cold starts on Render free tier
   const firstFailureTimeRef = useRef<number | null>(null);
+  const consecutiveFailuresRef = useRef<number>(0);
   const isCheckingRef = useRef<boolean>(false);
 
   const checkHealth = useCallback(async () => {
@@ -103,28 +104,39 @@ export const Sidebar: React.FC<SidebarProps> = ({
       const data = await api.getHealth();
       const elapsed = Math.round(performance.now() - t0);
       firstFailureTimeRef.current = null;
+      consecutiveFailuresRef.current = 0;
       if (data.status === 'warming_up' || data.ready === false) {
         setHealthStatus('warming_up');
         setHealthIssues(data.issues && data.issues.length > 0 ? data.issues : ['Server is warming up AI models...']);
+      } else if (data.job_running) {
+        // Server is healthy but busy analysing — show as healthy, not degraded
+        setHealthStatus('healthy');
+        setHealthIssues([]);
       } else {
         setHealthStatus(data.status === 'degraded' ? 'degraded' : 'healthy');
         setHealthIssues(data.issues || []);
       }
       setLatencyMs(elapsed);
     } catch {
-      if (firstFailureTimeRef.current === null) {
-        firstFailureTimeRef.current = Date.now();
-      }
-      const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
-      // Allow up to 3.5 minutes (210s) for cold start on Render before declaring offline
-      if (elapsedSec < 210) {
-        setHealthStatus('warming_up');
-        setHealthIssues(['Server is waking up (Render free tier cold start takes ~60s)...']);
+      consecutiveFailuresRef.current += 1;
+      // Don't declare offline on a single failure — require 3+ consecutive failures
+      if (consecutiveFailuresRef.current < 3) {
+        // Keep previous status, just note latency is unknown
         setLatencyMs(null);
       } else {
-        setHealthStatus('offline');
-        setHealthIssues(['Backend server unreachable. Click to retry.']);
-        setLatencyMs(null);
+        if (firstFailureTimeRef.current === null) {
+          firstFailureTimeRef.current = Date.now();
+        }
+        const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
+        if (elapsedSec < 210) {
+          setHealthStatus('warming_up');
+          setHealthIssues(['Server is waking up (Render free tier cold start takes ~60s)...']);
+          setLatencyMs(null);
+        } else {
+          setHealthStatus('offline');
+          setHealthIssues(['Backend server unreachable. Click to retry.']);
+          setLatencyMs(null);
+        }
       }
     } finally {
       isCheckingRef.current = false;

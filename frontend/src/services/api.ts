@@ -52,8 +52,8 @@ async function apiFetch(input: string, init?: RequestInit, retries: number = 2):
   const isUpload =
     typeof input === 'string' &&
     (input.includes('/video/upload') || input.includes('/inspect-strikers'));
-  // Health checks allow up to 75s to gracefully absorb cloud provider (Render) free-tier cold starts
-  const timeoutMs = isHealthCheck ? 75000 : (isUpload ? 300000 : 45000);
+  // Health checks allow up to 30s (Render cold start can take 60-70s, but apiFetch retries handle that)
+  const timeoutMs = isHealthCheck ? 30000 : (isUpload ? 300000 : 45000);
 
   let lastError: unknown;
 

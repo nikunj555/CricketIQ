@@ -43,6 +43,26 @@ def _get_file_sha256(path: Path) -> str:
         logger.warning(f"Could not calculate hash for {path}: {hash_err}")
         return "ERROR"
 
+def _recover_stale_jobs(session_repo):
+    """On startup, mark any session stuck in 'processing' as failed so the UI never hangs."""
+    try:
+        stale = [
+            s for s in session_repo.list_sessions(limit=500)
+            if s.get("status") == "processing"
+        ]
+        for s in stale:
+            sid = s.get("session_id")
+            logger.warning(f"Recovering stale job {sid}: marking as failed (server restarted)")
+            session_repo.update_progress(
+                sid, "failed", 0.0,
+                "Server restarted during analysis. Please retry.",
+                error="Server restarted during analysis. Please retry your upload."
+            )
+        if stale:
+            logger.info(f"Recovered {len(stale)} stale processing job(s) from previous server instance.")
+    except Exception as e:
+        logger.warning(f"Could not recover stale jobs: {e}")
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Ensure storage subdirectories exist
@@ -61,6 +81,8 @@ async def lifespan(app: FastAPI):
     try:
         from backend.app.repositories.session_repository import session_repo
         session_count = len(session_repo.list_sessions(limit=1000))
+        # PART 1.5: Recover stale jobs stuck in "processing" from a prior crash/restart
+        _recover_stale_jobs(session_repo)
     except sqlite3.Error as db_err:
         logger.warning(f"Could not read session count on startup: {db_err}")
 
@@ -94,12 +116,15 @@ async def lifespan(app: FastAPI):
             logger.info("PoseLandmarker pre-warmed successfully.")
         except Exception as e:
             logger.warning(f"Background pose warmup notice: {e}")
-        try:
-            from backend.app.services.hand_service import hand_service
-            hand_service.ensure_loaded()
-            logger.info("HandLandmarker pre-warmed successfully.")
-        except Exception as e:
-            logger.warning(f"Background hand warmup notice: {e}")
+        if settings.ENABLE_HAND_LANDMARKER:
+            try:
+                from backend.app.services.hand_service import hand_service
+                hand_service.ensure_loaded()
+                logger.info("HandLandmarker pre-warmed successfully.")
+            except Exception as e:
+                logger.warning(f"Background hand warmup notice: {e}")
+        else:
+            logger.info("HandLandmarker skipped in background warmup (ENABLE_HAND_LANDMARKER=False).")
         logger.info("Background model warmup complete.")
 
     threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup").start()

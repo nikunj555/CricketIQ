@@ -1,6 +1,7 @@
 import sys
 import shutil
 import sqlite3
+import time
 from pathlib import Path
 from fastapi import APIRouter
 from backend.app.core.config import settings
@@ -9,18 +10,73 @@ from backend.app.services.phase_service import phase_service
 from backend.app.services.hand_service import hand_service
 from backend.app.services.detector_service import detector_service
 from backend.app.services.keepalive_service import keepalive_service
-from backend.app.repositories.session_repository import session_repo
 
 router = APIRouter(prefix="/health", tags=["Health"])
+
 
 @router.api_route("", methods=["GET", "HEAD"])
 @router.api_route("/", methods=["GET", "HEAD"])
 def health_check():
-    # Database diagnostics: connected & writable
+    """Fast health check — no DB queries, no disk scans. Must respond in <50ms."""
+    pose_loaded = pose_service.landmarker is not None
+    pose_loading = getattr(pose_service, "is_loading", False)
+    pose_error = getattr(pose_service, "init_error", None)
+
+    hand_loaded = hand_service.landmarker is not None
+    hand_loading = getattr(hand_service, "is_loading", False)
+
+    phase_loaded = phase_service.model is not None
+
+    is_warming_up = pose_loading or hand_loading
+
+    # Check if an analysis job is currently running
+    from backend.app.services.video_service import _processing_lock
+    job_running = _processing_lock.locked()
+
+    issues = []
+    if is_warming_up:
+        issues.append("AI models are warming up in background.")
+    if not pose_loaded and not pose_loading:
+        issues.append(f"MediaPipe Pose Landmarker not loaded ({pose_error or 'init failed'}).")
+    if not phase_loaded:
+        issues.append("Phase model not loaded (using kinematic fallback).")
+
+    ready = pose_loaded
+
+    if is_warming_up:
+        status = "warming_up"
+    elif ready and len(issues) == 0:
+        status = "healthy"
+    elif ready:
+        status = "degraded"
+    else:
+        status = "unhealthy"
+
+    return {
+        "status": status,
+        "ready": ready,
+        "job_running": job_running,
+        "models": {
+            "pose": {"loaded": pose_loaded, "loading": pose_loading, "error": pose_error},
+            "pose_estimator": {"loaded": pose_loaded, "loading": pose_loading, "error": pose_error},
+            "hand": {"loaded": hand_loaded, "loading": hand_loading},
+            "hand_landmarker": {"loaded": hand_loaded, "loading": hand_loading},
+            "phase": {"loaded": phase_loaded},
+            "phase_classifier": {"loaded": phase_loaded},
+        },
+        "issues": issues,
+    }
+
+
+@router.api_route("/details", methods=["GET"])
+def health_details():
+    """Detailed diagnostics — DB queries, disk, memory. Not used for liveness checks."""
+    # Database diagnostics
     db_connected = False
     db_writable = False
     session_count = 0
     try:
+        from backend.app.repositories.session_repository import session_repo
         session_count = len(session_repo.list_sessions(limit=1000))
         db_connected = True
     except sqlite3.Error:
@@ -28,13 +84,12 @@ def health_check():
 
     try:
         with sqlite3.connect(settings.DB_PATH, timeout=2.0) as conn:
-            cursor = conn.cursor()
-            cursor.execute("PRAGMA quick_check(1)")
+            conn.cursor().execute("PRAGMA quick_check(1)")
             db_writable = True
     except sqlite3.Error:
         db_writable = False
 
-    # FFmpeg diagnostics
+    # FFmpeg
     ffmpeg_path = shutil.which("ffmpeg")
     if not ffmpeg_path:
         try:
@@ -46,7 +101,7 @@ def health_check():
             ffmpeg_path = None
     ffmpeg_available = ffmpeg_path is not None
 
-    # Storage diagnostics
+    # Storage
     free_mb = 0.0
     try:
         usage = shutil.disk_usage(settings.STORAGE_DIR)
@@ -54,21 +109,18 @@ def health_check():
     except OSError:
         pass
 
-    # Model states
+    # Model states (full detail)
     pose_loaded = pose_service.landmarker is not None
     pose_loading = getattr(pose_service, "is_loading", False)
     pose_error = getattr(pose_service, "init_error", None)
-
     hand_loaded = hand_service.landmarker is not None
     hand_loading = getattr(hand_service, "is_loading", False)
     hand_error = getattr(hand_service, "init_error", None)
-
     phase_loaded = phase_service.model is not None
     phase_error = None if phase_loaded else "BiLSTM model not loaded (using kinematic fallback)"
 
-    # Status evaluation
     is_warming_up = pose_loading or hand_loading
-    
+
     issues = []
     if is_warming_up:
         issues.append("AI models are warming up in background.")
@@ -85,7 +137,6 @@ def health_check():
     elif not db_writable:
         issues.append("SQLite database is read-only or locked.")
 
-    # ready condition: pose loaded, phase loaded or rule fallback ready, ffmpeg ready, db working
     ready = pose_loaded and ffmpeg_available and db_connected and db_writable
 
     if is_warming_up:
@@ -97,42 +148,7 @@ def health_check():
     else:
         status = "unhealthy"
 
-    pose_model_info = {
-        "name": "MediaPipe Pose Landmarker Full",
-        "loaded": pose_loaded,
-        "loading": pose_loading,
-        "asset_path": str(settings.MODEL_ASSET_PATH),
-        "asset_exists": settings.MODEL_ASSET_PATH.exists(),
-        "error": pose_error,
-    }
-
-    hand_model_info = {
-        "name": "MediaPipe Hand Landmarker",
-        "loaded": hand_loaded,
-        "loading": hand_loading,
-        "asset_path": str(settings.HAND_MODEL_PATH),
-        "asset_exists": settings.HAND_MODEL_PATH.exists(),
-        "error": hand_error,
-    }
-
-    phase_model_info = {
-        "name": "BiLSTM Batting Phase Classifier (NumPy)",
-        "loaded": phase_loaded,
-        "asset_path": str(getattr(phase_service, "npz_path", settings.PHASE_MODEL_PATH)),
-        "asset_exists": getattr(phase_service, "npz_path", settings.PHASE_MODEL_PATH).exists(),
-        "error": phase_error,
-    }
-
-    ffmpeg_info = {
-        "available": ffmpeg_available,
-        "path": ffmpeg_path,
-        "error": None if ffmpeg_available else "FFmpeg binary not found",
-    }
-
-    detector_info = detector_service.get_health_status()
-    keepalive_info = keepalive_service.get_status()
-
-    # Memory diagnostics (safeguard against Render 512MB RAM limit)
+    # Memory diagnostics
     memory_info = {}
     try:
         import psutil
@@ -146,9 +162,46 @@ def health_check():
     except Exception:
         memory_info = {"status": "unavailable"}
 
+    # Job status
+    from backend.app.services.video_service import _processing_lock
+    job_running = _processing_lock.locked()
+
+    detector_info = detector_service.get_health_status()
+    keepalive_info = keepalive_service.get_status()
+
+    pose_model_info = {
+        "name": "MediaPipe Pose Landmarker Full",
+        "loaded": pose_loaded,
+        "loading": pose_loading,
+        "asset_path": str(settings.MODEL_ASSET_PATH),
+        "asset_exists": settings.MODEL_ASSET_PATH.exists(),
+        "error": pose_error,
+    }
+    hand_model_info = {
+        "name": "MediaPipe Hand Landmarker",
+        "loaded": hand_loaded,
+        "loading": hand_loading,
+        "asset_path": str(settings.HAND_MODEL_PATH),
+        "asset_exists": settings.HAND_MODEL_PATH.exists(),
+        "error": hand_error,
+    }
+    phase_model_info = {
+        "name": "BiLSTM Batting Phase Classifier (NumPy)",
+        "loaded": phase_loaded,
+        "asset_path": str(getattr(phase_service, "npz_path", settings.PHASE_MODEL_PATH)),
+        "asset_exists": getattr(phase_service, "npz_path", settings.PHASE_MODEL_PATH).exists(),
+        "error": phase_error,
+    }
+    ffmpeg_info = {
+        "available": ffmpeg_available,
+        "path": ffmpeg_path,
+        "error": None if ffmpeg_available else "FFmpeg binary not found",
+    }
+
     return {
         "status": status,
         "ready": ready,
+        "job_running": job_running,
         "service": settings.PROJECT_NAME,
         "version": settings.VERSION,
         "python_version": sys.version.split()[0],
@@ -158,7 +211,6 @@ def health_check():
             "phase": phase_model_info,
             "ffmpeg": ffmpeg_info,
             "detector": detector_info,
-            # Backward compatibility aliases
             "pose_estimator": pose_model_info,
             "hand_landmarker": hand_model_info,
             "phase_classifier": phase_model_info,

@@ -133,15 +133,15 @@ export const EvaluationPage: React.FC = () => {
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
               BiLSTM Test Accuracy
             </span>
-            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-navy-800 text-brand-400 border border-brand-500/30">
-              Synthetic Benchmark
+            <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-navy-800 text-amber-400 border border-amber-500/30">
+              measured on synthetic data
             </span>
           </div>
           <div className="text-3xl font-extrabold font-mono text-emerald-400">
             {(report.accuracy * 100).toFixed(2)}%
           </div>
           <p className="text-[11px] text-slate-400">
-            Baseline: {(report.baseline_comparison.baseline_accuracy * 100).toFixed(2)}% ({'+' + report.baseline_comparison.accuracy_improvement}%)
+            Baseline: {(report.baseline_comparison.baseline_accuracy * 100).toFixed(2)}% ({'+' + report.baseline_comparison.accuracy_improvement}%) • measured on synthetic data
           </p>
         </div>
 

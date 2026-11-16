@@ -217,14 +217,24 @@ export const UploadPage: React.FC<UploadPageProps> = ({
         formData.append('striker_track_id', selectedTrackId.toString());
       }
 
-      // Stream upload with live byte-level progress reporting
-      const res = await api.uploadVideo(formData, (percent, loaded, total) => {
+      // Stream upload with live byte-level progress reporting and 1x auto-retry on network error
+      const onProgress = (percent: number, loaded: number, total: number) => {
         const mbLoaded = (loaded / (1024 * 1024)).toFixed(1);
         const mbTotal = (total / (1024 * 1024)).toFixed(1);
         const uploadProgress = Math.min(25, Math.max(3, Math.round((percent / 100) * 25)));
         setProgress(uploadProgress);
         setProcessingStatus(`Uploading video: ${percent}% (${mbLoaded} MB / ${mbTotal} MB)...`);
-      });
+      };
+
+      let res;
+      try {
+        res = await api.uploadVideo(formData, onProgress);
+      } catch (firstErr: any) {
+        // Auto-retry once on network failure
+        setProcessingStatus('Network hiccup during upload. Retrying upload (attempt 2/2)...');
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+        res = await api.uploadVideo(formData, onProgress);
+      }
 
       setProgress(26);
       setProcessingStatus('Video uploaded. Beginning multi-cue striker isolation & pose extraction...');
@@ -493,14 +503,39 @@ export const UploadPage: React.FC<UploadPageProps> = ({
               </div>
             </div>
 
-            {/* Error Message */}
-            {error && (
-              <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-800 text-xs text-rose-300 flex items-start space-x-2.5">
-                <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+            {/* Server Waking Up Banner */}
+            {!serverReady && (
+              <div className="p-3.5 rounded-xl bg-amber-500/15 border border-amber-500/40 text-xs text-amber-200 flex items-center space-x-2.5">
+                <Loader2 className="w-4 h-4 text-amber-400 animate-spin shrink-0" />
                 <div>
-                  <strong className="font-semibold">Upload Error: </strong>
-                  <span>{error}</span>
+                  <strong className="font-semibold">Waking up the server, this can take a minute. </strong>
+                  <span className="text-amber-200/90">The upload button will enable automatically as soon as the AI models are ready.</span>
                 </div>
+              </div>
+            )}
+
+            {/* Error Message with Retry */}
+            {error && (
+              <div className="p-4 rounded-xl bg-rose-950/60 border border-rose-800 text-xs text-rose-300 flex items-start justify-between space-x-2.5">
+                <div className="flex items-start space-x-2.5 min-w-0">
+                  <AlertCircle className="w-4 h-4 text-rose-400 shrink-0 mt-0.5" />
+                  <div>
+                    <strong className="font-semibold">Upload Error: </strong>
+                    <span className="break-words">{error}</span>
+                  </div>
+                </div>
+                {selectedFile && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      handleUpload(e);
+                    }}
+                    className="ml-4 px-3 py-1 bg-rose-800 hover:bg-rose-700 text-white rounded font-medium text-xs whitespace-nowrap shrink-0 transition-colors cursor-pointer"
+                  >
+                    Retry Analysis
+                  </button>
+                )}
               </div>
             )}
 
@@ -562,7 +597,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
               ) : !serverReady ? (
                 <>
                   <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
-                  <span>{isServerWarmingUp ? 'Server is waking up, upload enables automatically...' : 'Waiting for AI engine initialization...'}</span>
+                  <span>{isServerWarmingUp ? 'Waking up the server, this can take a minute...' : 'Waiting for AI engine initialization...'}</span>
                 </>
               ) : (
                 <>

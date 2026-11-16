@@ -13,6 +13,7 @@ export interface ModelHealthInfo {
 export interface HealthData {
   status: 'healthy' | 'warming_up' | 'degraded' | 'offline';
   ready?: boolean;
+  job_running?: boolean;
   issues?: string[];
   models?: {
     pose?: ModelHealthInfo;
@@ -33,6 +34,7 @@ export const SystemHealthBanner: React.FC = () => {
   const [checking, setChecking] = useState<boolean>(false);
 
   const firstFailureTimeRef = useRef<number | null>(null);
+  const consecutiveFailuresRef = useRef<number>(0);
   const isCheckingRef = useRef<boolean>(false);
   const pollTimerRef = useRef<any>(null);
 
@@ -43,26 +45,43 @@ export const SystemHealthBanner: React.FC = () => {
     try {
       const data: HealthData = await api.getHealth();
       firstFailureTimeRef.current = null;
-      setHealth(data);
-    } catch {
-      if (firstFailureTimeRef.current === null) {
-        firstFailureTimeRef.current = Date.now();
-      }
-      const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
-
-      // Allow up to 3.5 minutes (210s) of retry/backoff for free tier server wake up
-      if (elapsedSec < 210) {
+      consecutiveFailuresRef.current = 0;
+      if (data.job_running) {
+        // While an analysis job is running, server is busy but healthy
         setHealth({
-          status: 'warming_up',
-          ready: false,
-          issues: ['Server is waking up (Render free tier cold start takes ~60s)...'],
+          ...data,
+          status: 'healthy',
+          ready: true,
+          issues: [],
         });
       } else {
-        setHealth({
-          status: 'offline',
-          ready: false,
-          issues: ['Backend server is unreachable after multiple wake-up attempts.'],
-        });
+        setHealth(data);
+      }
+    } catch {
+      consecutiveFailuresRef.current += 1;
+      // Do not declare offline or warming up on a single intermittent failure
+      if (consecutiveFailuresRef.current < 3) {
+        // Keep existing health status
+      } else {
+        if (firstFailureTimeRef.current === null) {
+          firstFailureTimeRef.current = Date.now();
+        }
+        const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
+
+        // Allow up to 3.5 minutes (210s) of retry/backoff for free tier server wake up
+        if (elapsedSec < 210) {
+          setHealth({
+            status: 'warming_up',
+            ready: false,
+            issues: ['Server is waking up (Render free tier cold start takes ~60s)...'],
+          });
+        } else {
+          setHealth({
+            status: 'offline',
+            ready: false,
+            issues: ['Backend server is unreachable after multiple wake-up attempts.'],
+          });
+        }
       }
     } finally {
       isCheckingRef.current = false;
