@@ -8,7 +8,14 @@ from dataclasses import dataclass, field
 from pathlib import Path
 import numpy as np
 import cv2
-import requests
+import json
+import urllib.request
+import urllib.error
+
+try:
+    import requests
+except ImportError:
+    requests = None
 
 from backend.app.core.config import settings
 
@@ -161,7 +168,32 @@ class DetectorService:
 
             try:
                 t0 = time.time()
-                resp = requests.post(url, data=img_b64, headers=headers, timeout=timeout_sec)
+                status_code = 0
+                raw_data = {}
+                resp_text = ""
+
+                if requests is not None:
+                    resp = requests.post(url, data=img_b64, headers=headers, timeout=timeout_sec)
+                    status_code = resp.status_code
+                    if status_code == 200:
+                        raw_data = resp.json()
+                    else:
+                        resp_text = resp.text[:120]
+                else:
+                    req = urllib.request.Request(
+                        url,
+                        data=img_b64.encode("ascii"),
+                        headers=headers,
+                        method="POST"
+                    )
+                    try:
+                        with urllib.request.urlopen(req, timeout=timeout_sec) as u_resp:
+                            status_code = u_resp.status
+                            raw_data = json.loads(u_resp.read().decode("utf-8"))
+                    except urllib.error.HTTPError as h_err:
+                        status_code = h_err.code
+                        resp_text = h_err.read().decode("utf-8", errors="ignore")[:120]
+
                 elapsed = time.time() - t0
 
                 # Count this attempt
@@ -169,8 +201,7 @@ class DetectorService:
                     call_counter["count"] = call_counter.get("count", 0) + 1
                 self.total_api_calls_session += 1
 
-                if resp.status_code == 200:
-                    raw_data = resp.json()
+                if status_code == 200:
                     self.last_call_success = True
                     self.last_call_error = None
                     self.last_call_timestamp = time.time()
@@ -182,21 +213,21 @@ class DetectorService:
                     )
                     return detections, "ok"
 
-                elif resp.status_code in (401, 403):
-                    last_err_msg = f"Unauthorized (HTTP {resp.status_code}): Invalid ROBOFLOW_API_KEY."
+                elif status_code in (401, 403):
+                    last_err_msg = f"Unauthorized (HTTP {status_code}): Invalid ROBOFLOW_API_KEY."
                     logger.error(f"Roboflow detector auth error: {last_err_msg}")
                     self.last_call_success = False
                     self.last_call_error = "auth_error"
                     return [], "auth_error"
 
-                elif resp.status_code == 404:
+                elif status_code == 404:
                     last_err_msg = f"Model ID '{settings.ROBOFLOW_MODEL_ID}' not found on endpoint (HTTP 404)."
                     logger.error(f"Roboflow detector model error: {last_err_msg}")
                     self.last_call_success = False
                     self.last_call_error = "model_not_found"
                     return [], "model_not_found"
 
-                elif resp.status_code == 429:
+                elif status_code == 429:
                     last_err_msg = "Quota or rate limit exceeded (HTTP 429)."
                     logger.warning(f"Roboflow detector quota error: {last_err_msg}")
                     self.last_call_success = False
@@ -204,14 +235,17 @@ class DetectorService:
                     return [], "quota_exceeded"
 
                 else:
-                    last_err_msg = f"HTTP {resp.status_code}: {resp.text[:120]}"
+                    last_err_msg = f"HTTP {status_code}: {resp_text}"
                     logger.warning(f"Roboflow API warning: {last_err_msg}")
 
-            except (requests.exceptions.ConnectionError, requests.exceptions.Timeout) as net_err:
+            except (TimeoutError, urllib.error.URLError) as net_err:
                 last_err_msg = f"Network/Connection error: {type(net_err).__name__}"
                 logger.warning(f"Roboflow network error (attempt {attempt + 1}): {last_err_msg}")
             except Exception as ex:
-                last_err_msg = f"{type(ex).__name__}: {str(ex)}"
+                if requests is not None and isinstance(ex, (requests.exceptions.ConnectionError, requests.exceptions.Timeout)):
+                    last_err_msg = f"Network/Connection error: {type(ex).__name__}"
+                else:
+                    last_err_msg = f"{type(ex).__name__}: {str(ex)}"
                 logger.warning(f"Roboflow request exception (attempt {attempt + 1}): {last_err_msg}")
 
         self.last_call_success = False
