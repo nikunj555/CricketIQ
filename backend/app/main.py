@@ -104,7 +104,11 @@ async def lifespan(app: FastAPI):
 
     threading.Thread(target=_warmup_worker, daemon=True, name="model-warmup").start()
 
+    from backend.app.services.keepalive_service import keepalive_service
+    keepalive_service.start(settings.KEEP_ALIVE_URL, settings.KEEP_ALIVE_INTERVAL_SEC)
+
     yield
+    keepalive_service.stop()
     logger.info("CricketIQ Engine shutdown complete.")
 
 app = FastAPI(

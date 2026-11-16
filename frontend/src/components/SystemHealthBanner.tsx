@@ -33,9 +33,12 @@ export const SystemHealthBanner: React.FC = () => {
   const [checking, setChecking] = useState<boolean>(false);
 
   const firstFailureTimeRef = useRef<number | null>(null);
+  const isCheckingRef = useRef<boolean>(false);
   const pollTimerRef = useRef<any>(null);
 
   const checkHealth = useCallback(async () => {
+    if (isCheckingRef.current) return;
+    isCheckingRef.current = true;
     setChecking(true);
     try {
       const data: HealthData = await api.getHealth();
@@ -47,21 +50,22 @@ export const SystemHealthBanner: React.FC = () => {
       }
       const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
 
-      // Allow up to 3 minutes (180s) of retry/backoff for free tier server wake up
-      if (elapsedSec < 180) {
+      // Allow up to 3.5 minutes (210s) of retry/backoff for free tier server wake up
+      if (elapsedSec < 210) {
         setHealth({
           status: 'warming_up',
           ready: false,
-          issues: ['Server is waking up, this can take a minute...'],
+          issues: ['Server is waking up (Render free tier cold start takes ~60s)...'],
         });
       } else {
         setHealth({
           status: 'offline',
           ready: false,
-          issues: ['Backend server is unreachable after multiple wake-up attempts (3 min timeout).'],
+          issues: ['Backend server is unreachable after multiple wake-up attempts.'],
         });
       }
     } finally {
+      isCheckingRef.current = false;
       setChecking(false);
     }
   }, []);

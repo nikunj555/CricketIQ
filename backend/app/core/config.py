@@ -47,6 +47,10 @@ class Settings:
     ROBOFLOW_MAX_CALLS_PER_VIDEO: int = int(os.getenv("ROBOFLOW_MAX_CALLS_PER_VIDEO", "15"))
     ROBOFLOW_TIMEOUT_SEC: float = float(os.getenv("ROBOFLOW_TIMEOUT_SEC", "8.0"))
 
+    # Keep-alive self-ping configuration (prevents cloud services like Render free tier from idling)
+    KEEP_ALIVE_URL: str = os.getenv("KEEP_ALIVE_URL", os.getenv("RENDER_EXTERNAL_URL", "")).strip()
+    KEEP_ALIVE_INTERVAL_SEC: int = int(os.getenv("KEEP_ALIVE_INTERVAL_SEC", "540"))  # 9 minutes
+
     # Feature flags & validation gates
     ENABLE_EXPERIMENTAL_BAT_BALL: bool = os.getenv("ENABLE_EXPERIMENTAL_BAT_BALL", "false").lower() == "true"
     ENABLE_HAND_LANDMARKER: bool = os.getenv("ENABLE_HAND_LANDMARKER", "false").lower() == "true"

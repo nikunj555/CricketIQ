@@ -1,0 +1,26 @@
+name: Keep Render Backend Awake
+
+on:
+  schedule:
+    # Runs every 10 minutes (Render free tier spins down after 15 minutes of inactivity)
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  keep_alive_ping:
+    name: Ping Health Endpoint
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Ping CricketIQ Cloud Backend
+        run: |
+          echo "Sending keep-alive ping to CricketIQ backend on Render..."
+          STATUS_CODE=$(curl -s -o /dev/null -w "%{http_code}" -m 90 "https://cricketiq-v17s.onrender.com/api/health")
+          echo "Response HTTP Status: $STATUS_CODE"
+          if [ "$STATUS_CODE" -eq 200 ]; then
+            echo "Successfully kept Render backend warm and active."
+          else
+            echo "Notice: Non-200 or sleeping response ($STATUS_CODE). Retrying in 10s..."
+            sleep 10
+            curl -s -f -m 90 "https://cricketiq-v17s.onrender.com/api/health" || true
+          fi

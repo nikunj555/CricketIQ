@@ -8,6 +8,7 @@ from backend.app.services.pose_service import pose_service
 from backend.app.services.phase_service import phase_service
 from backend.app.services.hand_service import hand_service
 from backend.app.services.detector_service import detector_service
+from backend.app.services.keepalive_service import keepalive_service
 from backend.app.repositories.session_repository import session_repo
 
 router = APIRouter(prefix="/health", tags=["Health"])
@@ -129,6 +130,21 @@ def health_check():
     }
 
     detector_info = detector_service.get_health_status()
+    keepalive_info = keepalive_service.get_status()
+
+    # Memory diagnostics (safeguard against Render 512MB RAM limit)
+    memory_info = {}
+    try:
+        import psutil
+        proc = psutil.Process()
+        mem = proc.memory_info()
+        memory_info = {
+            "rss_mb": round(mem.rss / (1024 * 1024), 2),
+            "percent": round(proc.memory_percent(), 2),
+            "status": "healthy" if (mem.rss / (1024 * 1024)) < 400 else "warning"
+        }
+    except Exception:
+        memory_info = {"status": "unavailable"}
 
     return {
         "status": status,
@@ -149,6 +165,8 @@ def health_check():
         },
         "detector": detector_info,
         "ffmpeg": ffmpeg_info,
+        "memory": memory_info,
+        "keepalive": keepalive_info,
         "database": {
             "connected": db_connected,
             "writable": db_writable,

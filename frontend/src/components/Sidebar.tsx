@@ -91,10 +91,13 @@ export const Sidebar: React.FC<SidebarProps> = ({
   const [healthIssues, setHealthIssues] = useState<string[]>([]);
   const [latencyMs, setLatencyMs] = useState<number | null>(null);
 
-  // Poll /api/health with 3-minute backoff to gracefully absorb server cold starts on Render free tier
+  // Poll /api/health with backoff to gracefully absorb server cold starts on Render free tier
   const firstFailureTimeRef = useRef<number | null>(null);
+  const isCheckingRef = useRef<boolean>(false);
 
   const checkHealth = useCallback(async () => {
+    if (isCheckingRef.current) return;
+    isCheckingRef.current = true;
     const t0 = performance.now();
     try {
       const data = await api.getHealth();
@@ -113,16 +116,18 @@ export const Sidebar: React.FC<SidebarProps> = ({
         firstFailureTimeRef.current = Date.now();
       }
       const elapsedSec = (Date.now() - firstFailureTimeRef.current) / 1000;
-      // Allow up to 3 minutes (180s) for cold start on Render before declaring offline
-      if (elapsedSec < 180) {
+      // Allow up to 3.5 minutes (210s) for cold start on Render before declaring offline
+      if (elapsedSec < 210) {
         setHealthStatus('warming_up');
-        setHealthIssues(['Server is waking up, this can take a minute...']);
+        setHealthIssues(['Server is waking up (Render free tier cold start takes ~60s)...']);
         setLatencyMs(null);
       } else {
         setHealthStatus('offline');
-        setHealthIssues(['Backend server unreachable after multiple attempts.']);
+        setHealthIssues(['Backend server unreachable. Click to retry.']);
         setLatencyMs(null);
       }
+    } finally {
+      isCheckingRef.current = false;
     }
   }, []);
 
