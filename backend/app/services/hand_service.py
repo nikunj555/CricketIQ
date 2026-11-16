@@ -51,6 +51,8 @@ class HandService:
 
         try:
             self.is_loading = True
+            from backend.app.core.linux_gl_shim import preload_linux_gl_libraries
+            preload_linux_gl_libraries()
             from mediapipe.tasks import python
             from mediapipe.tasks.python import vision
             with open(self.model_path, "rb") as f:

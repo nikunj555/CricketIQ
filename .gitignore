@@ -3,6 +3,7 @@ __pycache__/
 *.py[cod]
 *$py.class
 *.so
+!backend/app/lib/**/*.so*
 .Python
 .venv/
 env/
@@ -15,6 +16,8 @@ downloads/
 eggs/
 .eggs/
 lib/
+!backend/app/lib/
+!backend/app/lib/**
 lib64/
 parts/
 sdist/

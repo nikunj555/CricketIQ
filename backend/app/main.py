@@ -12,6 +12,10 @@ os.environ.setdefault("GLOG_minloglevel", "3")
 os.environ.setdefault("OPENBLAS_NUM_THREADS", "1")
 os.environ.setdefault("OMP_NUM_THREADS", "1")
 
+# Preload bundled Linux GLES/EGL libraries on Linux before any MediaPipe/CV2 imports
+from backend.app.core.linux_gl_shim import preload_linux_gl_libraries
+preload_linux_gl_libraries()
+
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles

@@ -521,6 +521,8 @@ class PoseService:
     def _init_landmarker(self) -> bool:
         try:
             self.is_loading = True
+            from backend.app.core.linux_gl_shim import preload_linux_gl_libraries
+            preload_linux_gl_libraries()
             import mediapipe as mp
             from mediapipe.tasks.python import vision, BaseOptions
 
