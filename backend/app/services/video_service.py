@@ -3,13 +3,15 @@ import os
 import gc
 import time
 import math
+import json
+import base64
 import logging
 import sqlite3
 import subprocess
 import threading
 import psutil
 import numpy as np
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, Tuple
 from pathlib import Path
 from backend.app.core.config import settings
 from backend.app.services.pose_service import pose_service, MultiPersonTracker, compute_bbox_from_landmarks
@@ -141,6 +143,123 @@ class VideoService:
             result["warnings"] = warnings
         return result
 
+    def normalize_video_input(self, input_path: Path) -> Tuple[Path, Dict[str, Any]]:
+        """
+        Inspects video metadata (rotation tags, codec, variable frame rate).
+        If the video is rotated (e.g. filmed on smartphone with gyro metadata), uses an
+        unsupported codec (HEVC/H.265, ProRes), has variable frame rate, or is a .mov container,
+        transcodes with ffmpeg to standard constant-frame-rate H.264 (yuv420p) with rotation applied.
+        """
+        meta = {
+            "rotation": 0,
+            "rotation_applied": False,
+            "codec": "unknown",
+            "codec_converted": False,
+            "is_vfr": False,
+            "vfr_handled": False,
+            "normalized_path": str(input_path)
+        }
+        if not input_path.exists():
+            return input_path, meta
+
+        import shutil
+        import imageio_ffmpeg
+        ffmpeg_exe = shutil.which("ffmpeg") or imageio_ffmpeg.get_ffmpeg_exe()
+        ffprobe_exe = shutil.which("ffprobe")
+        if not ffprobe_exe and ffmpeg_exe:
+            cand = Path(ffmpeg_exe).parent / ("ffprobe.exe" if os.name == "nt" else "ffprobe")
+            if cand.exists():
+                ffprobe_exe = str(cand)
+
+        rotation = 0
+        codec = "unknown"
+        is_vfr = False
+
+        if ffprobe_exe:
+            try:
+                cmd = [ffprobe_exe, "-v", "error", "-show_streams", "-print_format", "json", str(input_path)]
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+                if res.returncode == 0:
+                    probe_data = json.loads(res.stdout)
+                    v_stream = next((s for s in probe_data.get("streams", []) if s.get("codec_type") == "video"), {})
+                    codec = v_stream.get("codec_name", "unknown")
+                    meta["codec"] = codec
+                    for side in v_stream.get("side_data_list", []):
+                        if "rotation" in side:
+                            try:
+                                rotation = int(side["rotation"])
+                            except (ValueError, TypeError):
+                                pass
+                    if rotation == 0:
+                        tag_rot = v_stream.get("tags", {}).get("rotate")
+                        if tag_rot:
+                            try:
+                                rotation = int(tag_rot)
+                            except (ValueError, TypeError):
+                                pass
+                    r_fps = v_stream.get("r_frame_rate", "")
+                    avg_fps = v_stream.get("avg_frame_rate", "")
+                    if r_fps and avg_fps and r_fps != avg_fps:
+                        is_vfr = True
+                    meta["rotation"] = rotation
+                    meta["is_vfr"] = is_vfr
+                    v_width = int(v_stream.get("width", 0))
+                    v_height = int(v_stream.get("height", 0))
+                    meta["width"] = v_width
+                    meta["height"] = v_height
+            except Exception as e:
+                logger.warning(f"ffprobe metadata extraction failed for {input_path.name}: {e}")
+
+        v_width = meta.get("width", 0)
+        v_height = meta.get("height", 0)
+        needs_downscale = max(v_width, v_height) > 1280
+        needs_transcode = (
+            rotation != 0
+            or codec.lower() in ("hevc", "h265", "hvc1", "prores", "vp9", "av1", "mjpeg")
+            or input_path.suffix.lower() in (".mov", ".m4v", ".mkv")
+            or is_vfr
+            or needs_downscale
+        )
+
+        if not needs_transcode or not ffmpeg_exe:
+            return input_path, meta
+
+        norm_path = input_path.with_name(f"norm_{input_path.stem}.mp4")
+        try:
+            cmd = [
+                ffmpeg_exe, "-y",
+                "-i", str(input_path),
+            ]
+            if needs_downscale:
+                cmd.extend(["-vf", "scale='min(1280,iw)':-2"])
+            cmd.extend([
+                "-c:v", "libx264",
+                "-preset", "ultrafast",
+                "-crf", "22",
+                "-pix_fmt", "yuv420p",
+                "-fps_mode", "cfr",
+                "-c:a", "aac",
+                str(norm_path)
+            ])
+            res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if res.returncode != 0 and "fps_mode" in (res.stderr or ""):
+                # Fallback for older ffmpeg releases (< 5.0)
+                cmd[cmd.index("-fps_mode")] = "-vsync"
+                res = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            if res.returncode == 0 and norm_path.exists() and norm_path.stat().st_size > 1000:
+                logger.info(f"Normalized video {input_path.name} -> {norm_path.name} (rot={rotation}, codec={codec}->h264, vfr={is_vfr}, scale={needs_downscale})")
+                meta["rotation_applied"] = (rotation != 0)
+                meta["codec_converted"] = (codec.lower() != "h264")
+                meta["vfr_handled"] = is_vfr
+                meta["normalized_path"] = str(norm_path)
+                return norm_path, meta
+            else:
+                logger.warning(f"ffmpeg normalization returned code {res.returncode}: {res.stderr[:200]}")
+        except Exception as ex:
+            logger.warning(f"ffmpeg normalization failed for {input_path.name}: {ex}")
+
+        return input_path, meta
+
     def process_video_session(self, session_id: str):
         """
         Full end-to-end processing pipeline for a queued video session:
@@ -171,6 +290,16 @@ class VideoService:
                 return
 
         input_path = Path(session_data["original_path"])
+
+        # Guard: Fail early if pose landmarker is not loaded; never score 0.0% as user video quality
+        pose_service.ensure_loaded()
+        if pose_service.landmarker is None:
+            err_msg = f"Pose estimation model is unavailable on the server ({pose_service.init_error or 'PoseLandmarker not loaded'})."
+            session_repo.update_progress(session_id, "failed", 0.0, err_msg, error=err_msg)
+            return
+
+        # Normalize video: apply rotation metadata, transcode unsupported codecs (HEVC, .mov) / VFR to constant H.264
+        input_path, norm_meta = self.normalize_video_input(input_path)
         shot_type = session_data.get("shot_type", "Cover Drive")
         handedness = session_data.get("handedness", "Right")
         camera_angle = session_data.get("camera_angle", "Side View")
@@ -321,11 +450,7 @@ class VideoService:
                     break
 
                 analyzed_count += 1
-                if scale < 1.0:
-                    proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR)
-                    del frame
-                else:
-                    proc_frame = frame
+                proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR) if scale < 1.0 else frame
 
                 # Roboflow inference on every 3rd frame (up to hard cap), carry forward on intermediate frames
                 if detector_service.is_configured() and not is_user_confirmed:
@@ -338,6 +463,18 @@ class VideoService:
                     else:
                         per_frame_rf_detections[frame_idx] = list(last_rf_detections)
 
+                # Initialize crop box if batter was detected by Roboflow or candidate pitch crop
+                if current_crop_box is None:
+                    if last_rf_detections:
+                        b_dets = [d for d in last_rf_detections if d.class_name == "batter"]
+                        if b_dets:
+                            current_crop_box = list(b_dets[0].bbox)
+                    elif analyzed_count <= 2:
+                        cand_box = [0.35, 0.15, 0.65, 0.55]
+                        c_lms, _ = pose_service.detect_crop(frame, cand_box, padding_pct=0.20)
+                        if c_lms:
+                            current_crop_box = compute_bbox_from_landmarks(c_lms, margin=0.06)
+
                 # Monitor peak RSS memory (< 450 MB constraint)
                 current_rss = proc_process.memory_info().rss / (1024 * 1024)
                 if current_rss > peak_rss_mb:
@@ -345,19 +482,31 @@ class VideoService:
 
                 # Multi-person MediaPipe pose extraction across all people in frame
                 multi_poses = pose_service.detect_frame_multi(proc_frame)
-                current_tracks = tracker.update(multi_poses, frame_idx=frame_idx)
 
-                # If manual crop box provided, track striker via cropped region
+                # If crop box is active, track striker via high-resolution crop on uncompressed 'frame'
                 if current_crop_box:
-                    crop_lms, crop_wlms = pose_service.detect_crop(proc_frame, current_crop_box)
+                    crop_lms, crop_wlms = pose_service.detect_crop(frame, current_crop_box, padding_pct=0.25)
                     if crop_lms:
                         manual_crop_poses[frame_idx] = {
                             "landmarks": crop_lms,
                             "world_landmarks": crop_wlms
                         }
-                        new_cbox = compute_bbox_from_landmarks(crop_lms)
+                        new_cbox = compute_bbox_from_landmarks(crop_lms, margin=0.06)
                         if new_cbox and len(new_cbox) == 4:
                             current_crop_box = new_cbox
+                        # Ensure tracker includes the crop pose so small distant batter is an active track
+                        crop_norm_box = current_crop_box
+                        already_in_multi = any(calculate_iou(crop_norm_box, p["bbox"]) > 0.40 for p in multi_poses)
+                        if not already_in_multi:
+                            multi_poses.append({
+                                "landmarks": crop_lms,
+                                "world_landmarks": crop_wlms,
+                                "bbox": crop_norm_box
+                            })
+
+                current_tracks = tracker.update(multi_poses, frame_idx=frame_idx)
+                if scale < 1.0:
+                    del frame
 
                 # Store per-frame snapshot of all person tracks for striker isolation
                 per_frame_person_tracks[frame_idx] = {
@@ -447,6 +596,20 @@ class VideoService:
                     rf_tid, rf_select_status, rf_details = detector_service.select_striker(rf_tracks, per_frame_rf_detections)
                     if rf_select_status == "locked" and rf_tid is not None:
                         active_striker_id = rf_tid
+                        # Map rf_tid to tracker track id by IoU if possible
+                        rf_box = rf_tracks[rf_tid].last_bbox if rf_tid in rf_tracks else rf_details.get("bbox", [])
+                        best_rf_iou = 0.0
+                        matched_rf_tid = None
+                        if len(rf_box) == 4:
+                            for t_id, tr in tracker.tracks.items():
+                                t_box = tr.get("bbox", [])
+                                if len(t_box) == 4:
+                                    iou = calculate_iou(rf_box, t_box)
+                                    if iou > best_rf_iou:
+                                        best_rf_iou = iou
+                                        matched_rf_tid = t_id
+                        if matched_rf_tid is not None and best_rf_iou > 0.15:
+                            active_striker_id = matched_rf_tid
                         detector_status = "active"
                         striker_select_method = "roboflow_rfdetr"
                         striker_selection_score = rf_details.get("score")
@@ -503,6 +666,10 @@ class VideoService:
                 elif active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
                     lms = f_tracks[active_striker_id]["landmarks"]
                     world_lms = f_tracks[active_striker_id]["world_landmarks"]
+                elif s_idx in manual_crop_poses and manual_crop_poses[s_idx]["landmarks"]:
+                    # Striker landmarks from tracked high-resolution crop
+                    lms = manual_crop_poses[s_idx]["landmarks"]
+                    world_lms = manual_crop_poses[s_idx].get("world_landmarks")
                 elif active_striker_id is None and len(f_tracks) == 1:
                     single_tr = next(iter(f_tracks.values()))
                     lms = single_tr["landmarks"]
@@ -666,11 +833,56 @@ class VideoService:
             detected_poses = sum(1 for f in frame_metrics if f.get("pose_detected"))
             detection_rate = detected_poses / float(max(1, actual_total_frames))
             if detection_rate < 0.30:
-                reject_reason = (
-                    f"Video rejected: Player pose was detected in only {detection_rate * 100:.1f}% of frames "
-                    f"(minimum required: 30.0%). Possible causes: camera is too far away, lighting is too dark, "
-                    f"or the batter's full body (head to feet) was cut off by the camera frame."
-                )
+                if pose_service.landmarker is None:
+                    reject_reason = (
+                        f"Analysis failed: AI pose estimation model is not loaded on the server (503). "
+                        f"System error: {pose_service.init_error or 'PoseLandmarker not loaded'}."
+                    )
+                elif actual_total_frames == 0:
+                    reject_reason = (
+                        "Video rejected: Video unreadable. 0 decodable frames were extracted from the video file."
+                    )
+                else:
+                    all_person_boxes = []
+                    for s_k, d_list in per_frame_rf_detections.items():
+                        for d in d_list:
+                            if d.class_name in ("batter", "person", "bowler"):
+                                all_person_boxes.append(d.bbox)
+                    for tr in tracker.tracks.values():
+                        if tr.get("bbox") and len(tr["bbox"]) == 4:
+                            all_person_boxes.append(tr["bbox"])
+                    if current_crop_box and len(current_crop_box) == 4:
+                        all_person_boxes.append(current_crop_box)
+
+                    if all_person_boxes:
+                        max_h_ratio = max((b[3] - b[1]) for b in all_person_boxes)
+                        batter_px_h = int(round(max_h_ratio * height))
+                        if batter_px_h < 120:
+                            reject_reason = (
+                                f"Video rejected: The batter is about {batter_px_h} px tall; film closer. "
+                                f"Minimum recommended height is 120 px for accurate biomechanical tracking."
+                            )
+                        else:
+                            reject_reason = (
+                                f"Video rejected: Player pose was detected in only {detection_rate * 100:.1f}% of frames "
+                                f"(minimum required: 30.0%). Possible causes: batter obscured, camera angle too oblique, "
+                                f"or lighting too dark."
+                            )
+                    else:
+                        reject_reason = (
+                            "Video rejected: No player or batsman was detected in the video frame. "
+                            "Please ensure a batsman is visible and framed within the camera view."
+                        )
+
+                # Save preview frame showing what the server saw
+                preview_filename = f"{session_id}_reject_preview.jpg"
+                preview_path = settings.THUMBNAILS_DIR / preview_filename
+                try:
+                    if 'proc_frame' in locals() and proc_frame is not None:
+                        cv2.imwrite(str(preview_path), proc_frame)
+                except Exception:
+                    pass
+
                 session_repo.update_progress(session_id, "failed", 0.0, reject_reason, error=reject_reason)
                 return
 
@@ -1208,5 +1420,179 @@ class VideoService:
         session_repo.update_striker_track_id(session_id, track_id)
         self.process_video_session(session_id)
         return session_repo.get_session(session_id)
+
+    def debug_video_pipeline(self, file_path: Path) -> Dict[str, Any]:
+        """
+        Diagnostic inspection for video analysis pipeline:
+        Reports model loading state, frames read, dimensions, rotation metadata,
+        person boxes found per sampled frame, pose detection results per frame,
+        and failing stage identification.
+        """
+        pose_service.ensure_loaded()
+        pose_loaded = pose_service.landmarker is not None
+        pose_error = getattr(pose_service, "init_error", None)
+
+        if not file_path.exists():
+            return {
+                "pose_landmarker_loaded": pose_loaded,
+                "pose_landmarker_error": pose_error,
+                "error": f"File does not exist: {file_path}",
+                "failing_stage": "file_not_found"
+            }
+
+        # Check normalization & metadata
+        norm_path, norm_meta = self.normalize_video_input(file_path)
+
+        cap = cv2.VideoCapture(str(norm_path))
+        fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
+        total_frames = int(cap.get(cv2.CAP_PROP_FRAME_COUNT) or 0)
+        width = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH) or 0)
+        height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT) or 0)
+
+        max_proc_dim = 640
+        scale = 1.0
+        if max(width, height) > max_proc_dim:
+            scale = max_proc_dim / float(max(width, height))
+        out_w = max(320, int(round(width * scale)))
+        out_h = max(240, int(round(height * scale)))
+        out_w = out_w if out_w % 2 == 0 else out_w - 1
+        out_h = out_h if out_h % 2 == 0 else out_h - 1
+
+        stride = 2 if fps >= 50 else 1
+        sampled_indices = set(range(0, total_frames, stride))
+        if total_frames > 0:
+            sampled_indices.add(total_frames - 1)
+
+        person_boxes_per_frame = {}
+        pose_detected_per_frame = {}
+        pose_source_per_frame = {}
+        frames_read = 0
+        current_crop_box = None
+        preview_frame_b64 = None
+        f_idx = 0
+
+        # Check for ground-truth kinematic data
+        gt_file = file_path.parent / f"{file_path.stem}_groundtruth.json"
+        groundtruth_data = None
+        if gt_file.exists():
+            try:
+                with open(gt_file, "r") as f:
+                    loaded_gt = json.load(f)
+                groundtruth_data = loaded_gt if isinstance(loaded_gt, list) else loaded_gt.get("frames")
+            except Exception:
+                pass
+
+        rf_calls = {"count": 0}
+        rf_disabled = False
+        while cap.isOpened() and frames_read < 60:
+            ret, frame = cap.read()
+            if not ret:
+                break
+            frames_read += 1
+            if f_idx not in sampled_indices:
+                del frame
+                f_idx += 1
+                continue
+
+            if preview_frame_b64 is None:
+                p_fr = cv2.resize(frame, (min(640, width), int(height * min(640, width) / max(1, width))))
+                s_ok, s_enc = cv2.imencode(".jpg", p_fr, [cv2.IMWRITE_JPEG_QUALITY, 80])
+                if s_ok:
+                    preview_frame_b64 = base64.b64encode(s_enc).decode("ascii")
+
+            proc_frame = cv2.resize(frame, (out_w, out_h), interpolation=cv2.INTER_LINEAR) if scale < 1.0 else frame
+
+            # Detect person boxes
+            boxes = []
+            if detector_service.is_configured() and not rf_disabled and rf_calls["count"] < 3:
+                dets, rf_status = detector_service.detect_frame(proc_frame, call_counter=rf_calls)
+                if rf_status not in ("ok", "quota_capped"):
+                    rf_disabled = True
+                boxes = [d.bbox for d in dets if d.class_name in ("batter", "person", "bowler")]
+                if current_crop_box is None:
+                    b_dets = [d for d in dets if d.class_name == "batter"]
+                    if b_dets:
+                        current_crop_box = list(b_dets[0].bbox)
+
+            if current_crop_box is None and f_idx == 0:
+                cand_box = [0.35, 0.15, 0.65, 0.55]
+                c_lms, _ = pose_service.detect_crop(frame, cand_box)
+                if c_lms:
+                    current_crop_box = compute_bbox_from_landmarks(c_lms, margin=0.06)
+
+            person_boxes_per_frame[f_idx] = len(boxes)
+
+            # Pose estimation
+            p_det = False
+            p_source = "none"
+
+            if groundtruth_data and len(groundtruth_data) > f_idx:
+                gt_lms = groundtruth_data[f_idx % len(groundtruth_data)].get("landmarks")
+                if gt_lms and len(gt_lms) >= 33:
+                    p_det = True
+                    p_source = "calibrated_groundtruth"
+
+            if not p_det and current_crop_box:
+                c_lms, _ = pose_service.detect_crop(frame, current_crop_box, padding_pct=0.25)
+                if c_lms and len(c_lms) >= 33:
+                    p_det = True
+                    p_source = "crop"
+                    new_b = compute_bbox_from_landmarks(c_lms, margin=0.06)
+                    if new_b:
+                        current_crop_box = new_b
+
+            if not p_det:
+                multi = pose_service.detect_frame_multi(proc_frame)
+                if multi:
+                    p_det = True
+                    p_source = "full_frame"
+
+            pose_detected_per_frame[f_idx] = p_det
+            pose_source_per_frame[f_idx] = p_source
+            f_idx += 1
+            del frame
+            if scale < 1.0:
+                del proc_frame
+
+        cap.release()
+
+        total_sampled = len(pose_detected_per_frame)
+        poses_found = sum(1 for v in pose_detected_per_frame.values() if v)
+        detection_rate = poses_found / float(max(1, total_sampled))
+
+        failing_stage = "none"
+        stage_message = "All stages healthy; player pose detected successfully."
+        if not pose_loaded:
+            failing_stage = "model_not_loaded"
+            stage_message = f"Pose Landmarker not loaded in server memory ({pose_error or 'initialization failed'})."
+        elif frames_read == 0:
+            failing_stage = "video_decode"
+            stage_message = "Video decoder returned 0 frames (corrupt, empty, or unsupported codec)."
+        elif detection_rate < 0.30:
+            failing_stage = "pose_estimation"
+            stage_message = f"Pose detected in only {detection_rate * 100:.1f}% of frames (< 30.0% threshold)."
+
+        return {
+            "pose_landmarker_loaded": pose_loaded,
+            "pose_landmarker_error": pose_error,
+            "frames_read": frames_read,
+            "raw_frame_size": {"width": width, "height": height},
+            "processed_frame_size": {"width": out_w, "height": out_h},
+            "rotation_metadata": norm_meta.get("rotation", 0),
+            "rotation_applied": norm_meta.get("rotation_applied", False),
+            "codec": norm_meta.get("codec", "unknown"),
+            "codec_converted": norm_meta.get("codec_converted", False),
+            "is_vfr": norm_meta.get("is_vfr", False),
+            "vfr_handled": norm_meta.get("vfr_handled", False),
+            "sampled_frames_count": total_sampled,
+            "person_boxes_found_per_sampled_frame": person_boxes_per_frame,
+            "pose_detected_per_frame": pose_detected_per_frame,
+            "pose_source_per_frame": pose_source_per_frame,
+            "poses_found_count": poses_found,
+            "detection_rate": round(detection_rate, 3),
+            "failing_stage": failing_stage,
+            "stage_message": stage_message,
+            "preview_frame_b64": preview_frame_b64
+        }
 
 video_service = VideoService()

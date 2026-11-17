@@ -4,6 +4,7 @@ import sqlite3
 import time
 from pathlib import Path
 from fastapi import APIRouter
+from fastapi.responses import JSONResponse
 from backend.app.core.config import settings
 from backend.app.services.pose_service import pose_service
 from backend.app.services.phase_service import phase_service
@@ -198,7 +199,7 @@ def health_details():
         "error": None if ffmpeg_available else "FFmpeg binary not found",
     }
 
-    return {
+    payload = {
         "status": status,
         "ready": ready,
         "job_running": job_running,
@@ -234,3 +235,7 @@ def health_details():
         },
         "issues": issues,
     }
+
+    if not pose_loaded and not pose_loading:
+        return JSONResponse(status_code=503, content=payload)
+    return payload

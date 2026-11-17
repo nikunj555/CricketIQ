@@ -28,6 +28,13 @@ async def inspect_strikers_endpoint(
     measure striker confidence, and suggest default striker.
     Supports two-pass Roboflow detection for small/distant batters and MediaPipe fallback.
     """
+    pose_service.ensure_loaded()
+    if pose_service.landmarker is None:
+        raise HTTPException(
+            status_code=503,
+            detail=f"Pose estimation AI engine is unavailable on the server ({pose_service.init_error or 'PoseLandmarker not loaded'}). Ensure runtime dependencies are installed."
+        )
+
     temp_id = str(uuid.uuid4())[:8]
     temp_path = settings.UPLOADS_DIR / f"temp_inspect_{temp_id}_{file.filename}"
     try:
@@ -354,3 +361,38 @@ def get_thumbnail(filename: str):
     if not path.exists():
         raise HTTPException(status_code=404, detail="Thumbnail not found.")
     return FileResponse(str(path), media_type="image/jpeg")
+
+@router.post("/debug")
+async def debug_video_endpoint(
+    file: UploadFile = File(...)
+):
+    """
+    Diagnostic debug endpoint reporting frames read, frame size, rotation metadata applied,
+    person boxes found per sampled frame, pose estimation results per frame, and failing stage.
+    """
+    temp_id = str(uuid.uuid4())[:8]
+    temp_path = settings.UPLOADS_DIR / f"temp_debug_{temp_id}_{file.filename}"
+    try:
+        with open(temp_path, "wb") as buffer:
+            shutil.copyfileobj(file.file, buffer)
+        report = video_service.debug_video_pipeline(temp_path)
+        return report
+    finally:
+        temp_path.unlink(missing_ok=True)
+
+@router.get("/debug/{session_id}")
+async def debug_session_endpoint(session_id: str):
+    """
+    Diagnostic debug endpoint for an existing session by ID.
+    """
+    session = session_repo.get_session(session_id)
+    if not session:
+        raise HTTPException(status_code=404, detail=f"Session {session_id} not found")
+    orig_path = Path(session.get("original_path", ""))
+    if not orig_path.exists():
+        raise HTTPException(status_code=404, detail="Original video file not found on disk")
+    report = video_service.debug_video_pipeline(orig_path)
+    report["session_id"] = session_id
+    report["session_status"] = session.get("status")
+    report["session_error"] = session.get("error")
+    return report

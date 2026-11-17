@@ -206,7 +206,20 @@ class DetectorService:
                     self.last_call_error = None
                     self.last_call_timestamp = time.time()
 
-                    detections = self._parse_predictions(raw_data.get("predictions", []), orig_w=w, orig_h=h)
+                    proc_h, proc_w = proc_frame.shape[:2]
+                    detections = self._parse_predictions(raw_data.get("predictions", []), orig_w=proc_w, orig_h=proc_h)
+
+                    # Re-map pixel bounding box to match input frame dimensions if frame was resized
+                    if proc_w != w or proc_h != h:
+                        for d in detections:
+                            d.bbox_px = [
+                                int(round(d.bbox[0] * w)),
+                                int(round(d.bbox[1] * h)),
+                                int(round(d.bbox[2] * w)),
+                                int(round(d.bbox[3] * h))
+                            ]
+                            d.center_px = (int(round(d.center[0] * w)), int(round(d.center[1] * h)))
+
                     logger.info(
                         f"Roboflow API call #{call_counter.get('count', 1) if call_counter else 1}: "
                         f"{len(detections)} objects detected in {elapsed * 1000:.1f}ms."

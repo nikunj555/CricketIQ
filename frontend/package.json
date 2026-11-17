@@ -9,7 +9,7 @@
   },
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && cross-env ROLLDOWN_WORKER_THREADS=1 UV_THREADPOOL_SIZE=1 vite build",
+    "build": "tsc -b && cross-env NODE_OPTIONS=--max-old-space-size=4096 ROLLDOWN_WORKER_THREADS=1 UV_THREADPOOL_SIZE=1 vite build",
     "lint": "oxlint",
     "test:e2e": "playwright test",
     "preview": "vite preview"
