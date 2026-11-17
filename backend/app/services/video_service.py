@@ -12,8 +12,8 @@ import numpy as np
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from backend.app.core.config import settings
-from backend.app.services.pose_service import pose_service, MultiPersonTracker
-from backend.app.services.detector_service import detector_service, Detection, DetectionTrack
+from backend.app.services.pose_service import pose_service, MultiPersonTracker, compute_bbox_from_landmarks
+from backend.app.services.detector_service import detector_service, Detection, DetectionTrack, calculate_iou
 from backend.app.services.geometry_service import geometry_service
 from backend.app.services.phase_service import phase_service
 from backend.app.services.feedback_service import feedback_service
@@ -26,6 +26,40 @@ logger = logging.getLogger(__name__)
 
 # Enforce single concurrent video processing job across web worker to preserve memory (< 450MB on Render 512MB tier)
 _processing_lock = threading.Lock()
+
+
+_UNKNOWN_SHOT_LABELS = {"no clear shot detected", "uncertain", "unrecognised shot", "unrecognized shot", "unknown", ""}
+
+
+def build_shot_mismatch_notice(
+    selected_shot: str,
+    predicted_shot: str,
+    confidence: float,
+    conf_code: Optional[str],
+    is_uncertain: bool,
+    auto_detect: bool,
+) -> Optional[str]:
+    """Return a "this looks like another shot" notice, or None.
+
+    The notice is shown only when the classifier is fairly or very sure, and is worded softly
+    because the classifier can be wrong. An unsure classifier must never contradict the shot the
+    user selected, and the sweep family (the classifier's known false-positive area) never
+    produces a notice. Feedback always stays on the selected shot.
+    """
+    predicted = (predicted_shot or "").strip()
+    if auto_detect or not settings.SHOT_MISMATCH_NOTICE:
+        return None
+    if conf_code not in ("very_sure", "fairly_sure") or is_uncertain:
+        return None
+    if predicted.lower() in _UNKNOWN_SHOT_LABELS or "sweep" in predicted.lower():
+        return None
+    if predicted.lower() == (selected_shot or "").strip().lower():
+        return None
+    return (
+        f"This looks more like a {predicted} ({int(round(confidence * 100))}% sure), but shot recognition can be wrong. "
+        f"You selected {selected_shot}, so the feedback below is for {selected_shot}."
+    )
+
 
 class VideoService:
     def validate_video_file(self, file_path: Path) -> Dict[str, Any]:
@@ -268,6 +302,8 @@ class VideoService:
             raw_detected_hands: Dict[int, Dict[str, Any]] = {}
             raw_detected_bat_ball: Dict[int, Dict[str, Any]] = {}
             per_frame_person_tracks: Dict[int, Dict[int, Dict[str, Any]]] = {}
+            manual_crop_poses: Dict[int, Dict[str, Any]] = {}
+            current_crop_box = list(parsed_manual_box) if parsed_manual_box and len(parsed_manual_box) == 4 else None
 
             frame_idx = 0
             analyzed_count = 0
@@ -310,6 +346,18 @@ class VideoService:
                 # Multi-person MediaPipe pose extraction across all people in frame
                 multi_poses = pose_service.detect_frame_multi(proc_frame)
                 current_tracks = tracker.update(multi_poses, frame_idx=frame_idx)
+
+                # If manual crop box provided, track striker via cropped region
+                if current_crop_box:
+                    crop_lms, crop_wlms = pose_service.detect_crop(proc_frame, current_crop_box)
+                    if crop_lms:
+                        manual_crop_poses[frame_idx] = {
+                            "landmarks": crop_lms,
+                            "world_landmarks": crop_wlms
+                        }
+                        new_cbox = compute_bbox_from_landmarks(crop_lms)
+                        if new_cbox and len(new_cbox) == 4:
+                            current_crop_box = new_cbox
 
                 # Store per-frame snapshot of all person tracks for striker isolation
                 per_frame_person_tracks[frame_idx] = {
@@ -438,16 +486,20 @@ class VideoService:
                 lms = None
                 world_lms = None
                 if active_striker_id == 999 and parsed_manual_box:
-                    best_m_iou = 0.0
-                    best_m_tid = None
-                    for tid, t_info in f_tracks.items():
-                        iou = calculate_iou(parsed_manual_box, t_info["bbox"])
-                        if iou > best_m_iou:
-                            best_m_iou = iou
-                            best_m_tid = tid
-                    if best_m_tid is not None and best_m_iou > 0.10:
-                        lms = f_tracks[best_m_tid]["landmarks"]
-                        world_lms = f_tracks[best_m_tid]["world_landmarks"]
+                    if s_idx in manual_crop_poses and manual_crop_poses[s_idx]["landmarks"]:
+                        lms = manual_crop_poses[s_idx]["landmarks"]
+                        world_lms = manual_crop_poses[s_idx].get("world_landmarks")
+                    else:
+                        best_m_iou = 0.0
+                        best_m_tid = None
+                        for tid, t_info in f_tracks.items():
+                            iou = calculate_iou(parsed_manual_box, t_info["bbox"])
+                            if iou > best_m_iou:
+                                best_m_iou = iou
+                                best_m_tid = tid
+                        if best_m_tid is not None and best_m_iou > 0.10:
+                            lms = f_tracks[best_m_tid]["landmarks"]
+                            world_lms = f_tracks[best_m_tid]["world_landmarks"]
                 elif active_striker_id in f_tracks and not f_tracks[active_striker_id]["is_lost"]:
                     lms = f_tracks[active_striker_id]["landmarks"]
                     world_lms = f_tracks[active_striker_id]["world_landmarks"]
@@ -684,9 +736,15 @@ class VideoService:
                 active_shot = shot_type
 
             # Headline discrepancy notice if detected shot differs from selected shot
-            shot_mismatch_warning = None
-            if not auto_detect_requested and predicted_shot.lower() != shot_type.lower():
-                shot_mismatch_warning = f"You selected {shot_type}, but this looks like a {predicted_shot}."
+            shot_mismatch_warning = build_shot_mismatch_notice(
+                selected_shot=shot_type,
+                predicted_shot=predicted_shot,
+                confidence=prediction_conf,
+                conf_code=(classification_result.get("shot_confidence") or {}).get("level_code")
+                or classification_result.get("confidence_level_code"),
+                is_uncertain=is_uncertain,
+                auto_detect=auto_detect_requested,
+            )
 
             # Identify the impact frame index
             impact_frame_idx = None
@@ -868,10 +926,18 @@ class VideoService:
             # Check shot support tier: preview-only shots never receive a score or fake feedback
             from backend.app.services.reference_service import reference_service
             shot_tier = reference_service.get_shot_support_tier(active_shot)
+            guidance_level = reference_service.get_guidance_level(active_shot)
+            how_to_play = reference_service.get_how_to_play(active_shot)
+            guidance_note = None
+            if guidance_level == "baseline":
+                guidance_note = (
+                    f"Guidance for {active_shot} uses standard reference ranges that are not yet calibrated "
+                    f"on many recorded clips, so treat the numbers as a guide, not a precise score."
+                )
             shot_conf = classification_result.get("shot_confidence") or {}
             conf_level_code = shot_conf.get("level_code", "fairly_sure")
 
-            if shot_tier != "supported":
+            if guidance_level == "none":
                 eval_res = None
                 overall_score = None
                 top_mistakes = []
@@ -888,15 +954,19 @@ class VideoService:
                 )
                 overall_score, top_mistakes, all_obs = eval_res
                 summary["overall_technique_score"] = overall_score
-                summary["support_tier"] = "supported"
+                summary["support_tier"] = "supported" if guidance_level == "calibrated" else "baseline"
 
-                coaching_paused = conf_level_code in ["cant_tell", "not_sure"] or (needs_confirmation and striker_track_id is None)
+                # The user chose the shot, so an unsure classifier never blocks coaching.
+                # Coaching pauses only when the striker is unclear, or (auto-detect mode)
+                # when the shot itself could not be determined.
+                shot_unsure = conf_level_code in ["cant_tell", "not_sure"]
+                coaching_paused = (needs_confirmation and striker_track_id is None) or (auto_detect_requested and shot_unsure)
                 pause_reason = None
                 if coaching_paused:
                     if needs_confirmation and striker_track_id is None:
                         pause_reason = confirmation_message or "Could not tell who the striker is. Please select the batter"
                     else:
-                        pause_reason = "Shot recognition is uncertain. Please confirm which shot you played so we can give you accurate technique coaching."
+                        pause_reason = "Shot recognition is uncertain. Please select which shot you played so we can give you accurate technique coaching."
 
                 # Generate structured metric comparison table (all phases and metrics vs ideal)
                 comparison_table = feedback_service.generate_comparison_table(
@@ -967,6 +1037,7 @@ class VideoService:
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
+                "striker_selection_method": striker_select_method,
                 "striker_score": striker_selection_score or striker_meta.get("striker_score", 0.85),
                 "striker_selection_score": striker_selection_score or striker_meta.get("striker_score", 0.85),
                 "striker_frames_selected": striker_frames_selected or (actual_total_frames if active_striker_id is not None else 0),
@@ -998,6 +1069,9 @@ class VideoService:
                 "striker_tracking_status": f"Striker Track #{active_striker_id} Locked (Non-strikers Excluded)",
                 "tracking_dropout_warning": tracking_dropout_warning,
                 "user_confirmed_shot_type": None,
+                "guidance_level": guidance_level,
+                "guidance_note": guidance_note,
+                "how_to_play": how_to_play,
                 "shot_classification": classification_result,
                 "shot_confidence": shot_conf,
                 "coaching_paused": coaching_paused,
@@ -1017,7 +1091,7 @@ class VideoService:
                 "metric_comparison_table": comparison_table,
                 "overall_technique_score": overall_score,
                 "top_mistakes": [m.model_dump() if hasattr(m, "model_dump") else m for m in top_mistakes],
-                "coaching_feedback": [f.model_dump() if hasattr(f, "model_dump") else f for f in all_obs] if shot_tier == "supported" else ["Preview only: analysis coming soon"],
+                "coaching_feedback": [f.model_dump() if hasattr(f, "model_dump") else f for f in all_obs] if guidance_level != "none" else ["Preview only: analysis coming soon"],
                 "limitations": limitations,
                 "model_metadata": model_metadata,
                 "validation_warnings": validation_warnings,
@@ -1071,6 +1145,15 @@ class VideoService:
         )
 
         result["shot_type"] = new_shot
+        from backend.app.services.reference_service import reference_service as _ref
+        _lvl = _ref.get_guidance_level(new_shot)
+        result["guidance_level"] = _lvl
+        result["guidance_note"] = (
+            f"Guidance for {new_shot} uses standard reference ranges that are not yet calibrated on many recorded clips, "
+            f"so treat the numbers as a guide, not a precise score." if _lvl == "baseline" else None
+        )
+        result["how_to_play"] = _ref.get_how_to_play(new_shot)
+        result["shot_mismatch_warning"] = None
         result["overall_technique_score"] = overall_score
         result["top_mistakes"] = [m.model_dump() for m in top_mistakes]
         result["coaching_feedback"] = [f.model_dump() for f in all_obs]

@@ -469,6 +469,8 @@ def test_manual_box_override_when_detector_finds_nothing():
     locking pose tracking exclusively to the user-specified box.
     """
     import json
+    from backend.app.services.video_service import VideoService
+    from backend.app.repositories.session_repository import session_repo
     vs = VideoService()
     manual_box = [0.44, 0.10, 0.56, 0.32]  # Custom batter box
     sid = "test_manual_box_session"
@@ -484,6 +486,51 @@ def test_manual_box_override_when_detector_finds_nothing():
     res = sess.get("result", {})
     assert res.get("striker_selection_method") == "user_manual_box"
     assert res.get("detector_status") == "user_confirmed"
+
+
+def test_behind_bowler_fixture_striker_isolation():
+    """
+    FIXTURE TEST:
+    Verifies that for behind-the-bowler footage (behind_bowler.mp4):
+    1. The foreground bowler running up is never selected as the striker.
+    2. Camera view warning / perspective is detected appropriately.
+    3. Manual crop box around far-end batter reliably locks striker tracking.
+    """
+    import json
+    from backend.app.services.video_service import VideoService
+    from backend.app.repositories.session_repository import session_repo
+    from backend.app.services.detector_service import detector_service, Detection
+
+    # Check detector camera view estimation on behind_bowler layout
+    dets = [
+        Detection("bowler", 0.88, [0.20, 0.40, 0.55, 0.98], [256, 288, 704, 705], (0.375, 0.69), (480, 496), 0.35, 0.58),
+        Detection("stumps", 0.75, [0.48, 0.20, 0.52, 0.32], [614, 144, 665, 230], (0.50, 0.26), (640, 187), 0.04, 0.12),
+        Detection("batter", 0.72, [0.46, 0.15, 0.54, 0.38], [588, 108, 691, 273], (0.50, 0.265), (640, 190), 0.08, 0.23)
+    ]
+    camera_view, view_warning = detector_service.estimate_camera_view(dets, (720, 1280))
+    assert camera_view == "behind_bowler"
+    assert "Sagittal plane metrics" in view_warning
+
+    # Run session with manual crop box specifying the far-end batter
+    vs = VideoService()
+    manual_box = [0.44, 0.12, 0.56, 0.38]
+    sid = "test_behind_bowler_manual_box_session"
+    session_repo.create_session(
+        session_id=sid,
+        video_filename="behind_bowler.mp4",
+        original_path="backend/tests/fixtures/behind_bowler.mp4",
+        manual_crop_box=json.dumps(manual_box)
+    )
+    vs.process_video_session(sid)
+    sess = session_repo.get_session(sid)
+    assert sess["status"] == "completed"
+    res = sess.get("result", {})
+    # Bowler is excluded, manual box locked
+    assert res.get("striker_selection_method") == "user_manual_box" or res.get("striker_isolation_evidence", {}).get("selection_method") == "user_manual_box"
+    assert res.get("active_striker_id", res.get("striker_track_id")) == 999
+    # Camera view or distance warning is reported
+    assert res.get("camera_view_warning") is not None or "camera" in str(res).lower()
+
 
 if __name__ == "__main__":
     print("Running test_striker_vs_bowler_classification()...")

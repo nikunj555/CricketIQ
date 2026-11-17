@@ -159,6 +159,9 @@ class AnalysisResult(BaseModel):
     striker_tracking_status: Optional[str] = None
     tracking_dropout_warning: Optional[str] = None
     shot_confidence: Optional[Dict[str, Any]] = None
+    guidance_level: Optional[str] = None
+    guidance_note: Optional[str] = None
+    how_to_play: Optional[Dict[str, Any]] = None
     coaching_paused: Optional[bool] = False
     pause_reason: Optional[str] = None
     plain_summary: Optional[Dict[str, Any]] = None

@@ -874,7 +874,8 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
         </div>
       </div>
 
-      {/* Honest Discrepancy Notice Banner */}
+      {/* Shot check: shown only when the classifier is confident the swing looks like another shot.
+          The feedback below always uses the shot the user selected unless they choose to switch. */}
       {analysis.shot_mismatch_warning && (
         <div className="p-3.5 rounded-xl bg-amber-950/70 border border-amber-600/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
           <div className="flex items-center space-x-2 text-amber-200">
@@ -882,23 +883,50 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
             <div>
               <div className="font-bold text-amber-300 text-sm">{analysis.shot_mismatch_warning}</div>
               <div className="text-[11px] text-amber-200/80">
-                Technique comparison is currently scored against the detected stroke ({analysis.shot_type}).
+                Your feedback below is for the shot you selected ({analysis.shot_type}). You can switch if the other shot is correct.
               </div>
             </div>
           </div>
           <div className="flex items-center space-x-2 shrink-0">
-            {analysis.user_selected_shot && analysis.user_selected_shot !== analysis.shot_type && (
+            {analysis.predicted_shot_type && analysis.predicted_shot_type !== analysis.shot_type && (
               <button
-                onClick={() => handleReanalyzeAsSelected(analysis.user_selected_shot!)}
+                onClick={() => handleReanalyzeAsSelected(analysis.predicted_shot_type!)}
                 disabled={isConfirmingShot}
                 className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-black font-bold transition-colors cursor-pointer shadow"
               >
-                Re-analyse as {analysis.user_selected_shot}
+                Analyse as {analysis.predicted_shot_type}
               </button>
             )}
           </div>
         </div>
       )}
+
+      {analysis.guidance_note && (
+        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700 text-[11px] text-slate-300">
+          {analysis.guidance_note}
+        </div>
+      )}
+
+      {analysis.how_to_play && (analysis.how_to_play.phase_steps?.length || analysis.how_to_play.key_points?.length) ? (
+        <div className="bg-navy-900/80 rounded-xl border border-navy-800 p-4 space-y-2 text-xs">
+          <h4 className="font-semibold text-slate-200 text-sm">How a {analysis.how_to_play.shot} should be played</h4>
+          {analysis.how_to_play.bat_path && (
+            <div className="text-slate-300">Bat path: {analysis.how_to_play.bat_path}</div>
+          )}
+          <ol className="list-decimal list-inside space-y-1 text-slate-300">
+            {analysis.how_to_play.phase_steps.map((step, i) => (
+              <li key={i}>{step}</li>
+            ))}
+          </ol>
+          {analysis.how_to_play.key_points.length > 0 && (
+            <ul className="list-disc list-inside space-y-1 text-slate-400">
+              {analysis.how_to_play.key_points.map((pt, i) => (
+                <li key={i}>{pt}</li>
+              ))}
+            </ul>
+          )}
+        </div>
+      ) : null}
 
       {/* Striker Isolation & Manual Override */}
       {analysis.striker_isolation_evidence && (

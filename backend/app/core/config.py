@@ -53,6 +53,11 @@ class Settings:
 
     # Feature flags & validation gates
     ENABLE_EXPERIMENTAL_BAT_BALL: bool = os.getenv("ENABLE_EXPERIMENTAL_BAT_BALL", "false").lower() == "true"
+    # Give feedback for every catalogue shot that has reference ranges, labelled "baseline guidance"
+    # when it is not calibrated on enough labelled clips. Set false to restore preview-only gating.
+    ALLOW_BASELINE_GUIDANCE: bool = os.getenv("ALLOW_BASELINE_GUIDANCE", "true").lower() == "true"
+    # Show "this looks like another shot" only when the classifier is very sure. Set false to disable.
+    SHOT_MISMATCH_NOTICE: bool = os.getenv("SHOT_MISMATCH_NOTICE", "true").lower() == "true"
     ENABLE_HAND_LANDMARKER: bool = os.getenv("ENABLE_HAND_LANDMARKER", "false").lower() == "true"
     MIN_CLIPS_FOR_SUPPORTED_SHOT: int = int(os.getenv("MIN_CLIPS_FOR_SUPPORTED_SHOT", "8"))
     MIN_BATTERS_FOR_SUPPORTED_SHOT: int = int(os.getenv("MIN_BATTERS_FOR_SUPPORTED_SHOT", "2"))

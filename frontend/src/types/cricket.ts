@@ -207,6 +207,9 @@ export interface AnalysisResult {
   predicted_shot_type?: string | null;
   prediction_confidence?: number | null;
   shot_confidence?: ShotConfidence | null;
+  guidance_level?: 'calibrated' | 'baseline' | 'none' | null;
+  guidance_note?: string | null;
+  how_to_play?: { shot: string; bat_path?: string | null; key_points: string[]; phase_steps: string[] } | null;
   coaching_paused?: boolean;
   pause_reason?: string | null;
   plain_summary?: PlainTopSummary | null;

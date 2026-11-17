@@ -94,7 +94,56 @@ class ReferenceService:
         if not shot:
             return False
         tier = self.get_shot_support_tier(shot_name_or_slug)
-        return tier == "supported"
+        if tier == "supported":
+            return True
+        return self.has_baseline_guidance(shot_name_or_slug)
+
+    def has_baseline_guidance(self, shot_name_or_slug: str) -> bool:
+        """True when the shot has authored reference ranges we can compare against,
+        even though it is not calibrated on enough labelled clips."""
+        from backend.app.core.config import settings
+        if not settings.ALLOW_BASELINE_GUIDANCE:
+            return False
+        shot = self.get_shot_reference(shot_name_or_slug)
+        return bool(shot and shot.get("phases"))
+
+    def get_guidance_level(self, shot_name_or_slug: str) -> str:
+        """'calibrated' (enough labelled clips), 'baseline' (authored ranges only) or 'none'."""
+        if self.get_shot_support_tier(shot_name_or_slug) == "supported":
+            return "calibrated"
+        return "baseline" if self.has_baseline_guidance(shot_name_or_slug) else "none"
+
+    def get_how_to_play(self, shot_name_or_slug: str) -> Optional[Dict[str, Any]]:
+        """Plain-language description of how the shot should be played, from the reference data."""
+        shot = self.get_shot_reference(shot_name_or_slug)
+        if not shot:
+            return None
+        canonical = self.canonicalize_shot_name(shot_name_or_slug)
+        steps = []
+        phases = shot.get("phases", {})
+        phase_text = {
+            "stance": "Stance: balanced and relaxed, weight even, head still.",
+            "backlift": "Backlift: lift the bat back in a straight line, wrists cocked.",
+            "stride": "Stride: move the front foot decisively towards the line of the ball.",
+            "downswing": "Downswing: the lead elbow leads the bat down the line.",
+            "impact": "Impact: head over the ball, bat meets ball under your eyes.",
+            "follow_through": "Follow-through: finish balanced with a full, controlled extension.",
+            "recovery": "Recovery: settle back to a balanced ready position.",
+        }
+        for key in ["stance", "backlift", "stride", "downswing", "impact", "follow_through", "recovery"]:
+            if key in phases:
+                line = phase_text[key]
+                imp = phases[key] if key == "impact" else None
+                if imp and isinstance(imp.get("lead_knee_angle"), dict):
+                    k = imp["lead_knee_angle"]
+                    line += f" Front knee about {round(k.get('min', 0))}-{round(k.get('max', 0))} degrees."
+                steps.append(line)
+        return {
+            "shot": canonical,
+            "bat_path": shot.get("ideal_bat_path"),
+            "key_points": list(shot.get("coaching_cues", []))[:4],
+            "phase_steps": steps,
+        }
 
     def get_phase_ideal_range(
         self,
@@ -107,7 +156,9 @@ class ReferenceService:
         Phase names can be loosely matched (e.g. 'Impact window' -> 'impact').
         """
         shot = self.get_shot_reference(shot_name_or_slug)
-        if not shot or shot.get("analysis_status") != "available":
+        if not shot:
+            return None
+        if shot.get("analysis_status") != "available" and not self.has_baseline_guidance(shot_name_or_slug):
             return None
 
         # Normalize phase key

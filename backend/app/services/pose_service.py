@@ -492,12 +492,9 @@ class MultiPersonTracker:
         confirmation_message = None
         if len(ranked) > 1:
             score_diff = abs(best_meta["striker_score"] - second_score)
-            if score_diff < max(0.12, 0.15 * best_meta["striker_score"]) and best_meta["striker_score"] >= 0.35:
+            if score_diff < 0.15 or best_meta["striker_score"] < 0.50 or best_meta.get("role") == "bowler":
                 needs_confirmation = True
-                confirmation_message = f"Two candidates scored within close margin ({best_meta['striker_score']:.2f} vs {second_score:.2f}). Please select the batter."
-            elif best_meta["striker_score"] < 0.40 or best_meta.get("role") == "bowler":
-                needs_confirmation = True
-                confirmation_message = f"Striker confidence is low ({best_meta['striker_score']:.2f}). Please select or draw a box around the batter."
+                confirmation_message = "Could not tell who the striker is. Please select the batter"
 
         self.track_classifications = classifications
         return best_tid, classifications, needs_confirmation, confirmation_message
