@@ -1,8 +1,9 @@
-# CricketIQ — Real-Time AI Batting Coach & Explainable Kinematic Assessment System
+# CricketIQ — AI Batting Technique Coach
+
+> **Core Philosophy**: CricketIQ is a batting **TECHNIQUE COACH**. The user selects the shot they played, uploads a video, and receives feedback against that shot's reference: how the shot should be played, what they did, their top mistakes, and the one thing to fix first. Shot recognition is only an optional parallel **CHECK**, never the basis of the feedback. Coaching is never paused for shot uncertainty.
 
 [![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-1.0-009688.svg)](https://fastapi.tiangolo.com/)
-[![PyTorch](https://img.shields.io/badge/PyTorch-2.2+-ee4c2c.svg)](https://pytorch.org/)
 [![MediaPipe](https://img.shields.io/badge/MediaPipe-Pose-007acc.svg)](https://developers.google.com/mediapipe)
 [![React](https://img.shields.io/badge/React-18-61dafb.svg)](https://react.dev/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.7-3178c6.svg)](https://www.typescriptlang.org/)
@@ -11,17 +12,32 @@
 
 ---
 
-## 1. Project Title
-**CricketIQ — An Explainable AI System for Cricket Batting Technique Assessment and Real-Time Practice Coaching**
+## 1. Project Overview & Coaching Flow
+CricketIQ structures every video evaluation around the athlete's **selected shot** from our 25-shot MCC catalogue:
+1. **Selection Required**: The user specifies the shot played (e.g. Cover Drive, Straight Drive, Flick Shot, Pull Shot), handedness, and camera angle.
+2. **Technique Breakdown (A -> F Order)**:
+   - **A. How This Shot Should Be Played**: 5 to 7 key biomechanical steps (stance, trigger, stride, downswing, impact, follow-through) with body angles, visual cues, and bat path.
+   - **B. What You Did (Metric Comparison)**: Measured values vs target ranges across stroke phases with camera validity status (`MEASURED`, `ESTIMATED`, `MODEL_INFERRED`, `UNAVAILABLE`).
+   - **C. Top Mistakes**: Top 3 faults ranked by importance (what went wrong, measured vs ideal, why it matters, and recommended drill).
+   - **D. The One Thing to Fix First**: Spotlight high-priority fault card with jump-to-frame button.
+   - **E. Technique Scores**: Overall score (0–100) and phase breakdown scores.
+   - **F. Side-by-Side Video & Reference**: Synchronized video scrubbing alongside textbook coaching breakdowns.
+3. **Parallel Shot Check**: Shot recognition runs as an independent verification check:
+   - `Shot confirmed`: Classifier agrees with the user's selection.
+   - `Could not confirm the shot type`: Sub-threshold confidence or uncalibrated shot; coaching proceeds unaffected.
+   - `Mismatch notice`: Appears *only* if the classifier is fairly/very sure of another shot in the `supported` tier (calibrated clips >= 8), never for sweeps, and never pauses coaching.
 
 ---
 
-## 2. Abstract
-CricketIQ is an end-to-end computer vision and explainable artificial intelligence (XAI) sports-tech platform engineered to evaluate cricket batting movement in two complementary modes:
-1. **Mode A: Live Batting Coach (Real-Time):** A lightweight on-field practice companion that connects to any device camera via `getUserMedia`. Utilizing a 5-state finite state machine and kinetic velocity burst detection, it tracks the batsman's movement, detects when a stroke begins and ends, and presents an immediate, evidence-grounded post-shot feedback card (lead knee flexion, torso lean, head stability, target comparison, previous attempt delta, and next practice drill) with < 40ms processing latency so players can immediately practice the next shot.
-2. **Mode B: Detailed Video Analysis:** A deep-dive analytical suite for recorded footage featuring frame-synchronized skeleton overlays, Recharts kinematic time-series curves, 7-phase temporal segmentation using a custom PyTorch Bidirectional LSTM (BiLSTM), Dynamic Time Warping (DTW) trajectory alignment against textbook Marylebone Cricket Club (MCC) coaching standards, and longitudinal SQLite progress tracking.
+## 2. Honest Limits & Capabilities
 
-On held-out synthetic test sequences (synthetic benchmark), our custom PyTorch BiLSTM achieves **98.69% accuracy** and **0.9837 macro F1**, an empirical gain of **+9.07%** over the static classification baseline. All measurements run locally on standard student hardware without cloud GPU or paid API dependencies.
+| Capability Tier | Coverage | Details |
+| :--- | :--- | :--- |
+| **Calibrated Technique Analysis** | **3 Shots**: Cover Drive, Straight Drive, Pull Shot | Calibrated against empirical video footage and Marylebone Cricket Club (MCC) kinematic ranges. Full comparative metric scoring. |
+| **Baseline Guidance** | **22 Catalogue Shots**: Flick Shot, Cut, Sweep, Scoop, Defense, etc. | Standard coaching manual ranges and 5–7 phase breakdown. Clearly tagged with: *"Guidance for {Shot} uses standard reference ranges that are not yet calibrated on many recorded clips, so treat the numbers as a guide, not a precise score."* |
+| **Optimal Filming Conditions** | Side-on or 45° angle, 3–5m distance, single batter | Batter height > 120 px, good lighting, clear view of limbs. |
+| **Known Failure Conditions** | Camera behind bowler, overlapping players, distant batter (< 120 px) | Camera behind bowler causes perspective foreshortening. Multiple overlapping players can challenge monocular trackers. When batter height is under 120 px, the system warns: *"camera too far, angle oblique: batter is about X px tall; film closer"*. |
+| **Synthetic Benchmark Scope** | BiLSTM Phase Classifier (98.69% accuracy) | Evaluated on synthetic kinematic sequences; monocular field video uses adaptive filtering and validity indicators. |
 
 ---
 
@@ -318,14 +334,14 @@ Open your browser to: **`http://127.0.0.1:8000/`**.
 
 ### Quality Gates & Verification Commands
 ```powershell
-# 1. Run the complete Pytest backend test suite (90/90 tests passing)
+# 1. Run the complete Pytest backend test suite (141/141 tests passing)
 pytest backend/tests -v
 
-# 2. Run the 7-subsystem End-to-End Smoke Test
-python scripts/smoke_test.py
+# 2. Run the 4-shot Technique Coach validation pipeline (Cover Drive, Straight Drive, Flick Shot, Mismatch)
+python scratch/run_four_video_checks.py
 
-# 3. Run Playwright E2E visual verification with synthetic camera stream
-npm run test:e2e --prefix frontend
+# 3. Section order verification in Workspace UI (asserts A -> B -> C -> D -> E -> F sequence)
+python scratch/check_sections.py
 
 # 4. Frontend TypeScript validation & production compilation
 npm run build --prefix frontend
@@ -448,6 +464,9 @@ Add the following variables in the **Environment** tab of your Render Web Servic
 | `ROBOFLOW_CONFIDENCE_THRESHOLD` | Minimum confidence score to accept detections | `0.35` |
 | `ROBOFLOW_MAX_CALLS_PER_VIDEO` | Hard quota limit on detector API calls per video | `15` |
 | `ROBOFLOW_TIMEOUT_SEC` | HTTP request timeout for hosted API calls | `8.0` |
+| `ALLOW_BASELINE_GUIDANCE` | Enable MCC baseline guidance for uncalibrated catalogue shots | `True` |
+| `SHOT_MISMATCH_NOTICE` | Display cautious mismatch notice if classifier detects a different supported shot | `True` |
+| `KEEPALIVE_URL` | Optional endpoint URL pinged by GitHub Actions keep-alive workflow | `https://<render-app>.onrender.com/api/health` |
 
 #### 3. Striker Lock & Fallback Behavior
 - **Striker Isolation**: The striker is locked by IoU temporal tracking, bat-wrist overlap verification, box size, and stumps proximity.

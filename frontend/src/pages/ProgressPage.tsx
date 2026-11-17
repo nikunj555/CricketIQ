@@ -31,7 +31,6 @@ import {
 } from 'recharts';
 import { SessionListItem, SessionListResponse, CricketShot, NavTab } from '../types/cricket';
 import { api } from '../services/api';
-import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface ProgressPageProps {
   onSelectSession: (sessionId: string) => void;
@@ -318,17 +317,16 @@ export const ProgressPage: React.FC<ProgressPageProps> = ({
           </div>
         ) : (
           <div className="p-6 rounded-2xl bg-[#111315] border border-[#303438] flex flex-col md:flex-row items-center gap-6">
-            <div className="w-full md:w-1/2 h-56 rounded-xl overflow-hidden border border-[#303438] bg-[#050505]">
-              <Batter3DCanvas
-                shotName={selectedShotFilter}
-                isGhost={true}
-                ghostColor="#00f0ff"
-                height="100%"
-                showControls={false}
-                showPhaseScrubber={false}
-                showCameraPresets={false}
-                autoOrbitDefault={true}
-              />
+            <div className="w-full md:w-1/2 p-6 rounded-xl border border-[#303438] bg-[#050505] space-y-3">
+              <div className="text-xs font-mono text-[#7FEA35] font-bold uppercase tracking-wider">
+                Benchmark Technique
+              </div>
+              <div className="text-sm font-bold text-white">
+                {selectedShotFilter}
+              </div>
+              <p className="text-xs text-[#A5A9AD] leading-relaxed">
+                Biomechanical reference benchmarks are configured and ready. Upload or record your stroke to view progress metrics.
+              </p>
             </div>
             <div className="w-full md:w-1/2 space-y-3 text-left">
               <div className="inline-block px-2 py-0.5 rounded bg-cyan-950/80 border border-cyan-800 text-cyan-300 text-[10px] font-mono font-bold uppercase">

@@ -582,25 +582,29 @@ class ShotClassifierService:
         )
 
         MIRROR_EQUIVALENTS = {
-            "cover drive": "on drive",
-            "on drive": "cover drive",
-            "off drive": "on drive",
-            "square cut": "pull shot",
-            "pull shot": "square cut",
-            "hook shot": "square cut",
-            "late cut": "leg glance",
-            "leg glance": "late cut",
-            "flick shot": "off drive",
-            "sweep": "reverse sweep",
-            "reverse sweep": "sweep",
-            "slog sweep": "reverse sweep",
-            "paddle sweep": "reverse sweep",
-            "straight drive": "straight drive",
-            "forward defensive": "forward defensive",
-            "back-foot defensive": "back-foot defensive",
+            "cover drive": {"on drive", "off drive", "cover drive"},
+            "off drive": {"on drive", "cover drive", "off drive"},
+            "on drive": {"cover drive", "off drive", "on drive"},
+            "square cut": {"pull shot", "hook shot", "square cut"},
+            "pull shot": {"square cut", "hook shot", "pull shot"},
+            "hook shot": {"square cut", "pull shot", "hook shot"},
+            "late cut": {"leg glance", "late cut"},
+            "leg glance": {"late cut", "leg glance"},
+            "flick shot": {"off drive", "on drive", "flick shot"},
+            "sweep": {"reverse sweep", "sweep"},
+            "reverse sweep": {"sweep", "reverse sweep"},
+            "slog sweep": {"reverse sweep", "sweep", "slog sweep"},
+            "paddle sweep": {"reverse sweep", "sweep", "paddle sweep"},
+            "straight drive": {"straight drive"},
+            "forward defensive": {"forward defensive"},
+            "back-foot defensive": {"back-foot defensive"},
         }
 
-        if mirrored_shot.lower() == top_shot.lower() or mirrored_shot.lower() == MIRROR_EQUIVALENTS.get(top_shot.lower()):
+        equivs = MIRROR_EQUIVALENTS.get(top_shot.lower(), {top_shot.lower()})
+        if isinstance(equivs, str):
+            equivs = {equivs}
+
+        if mirrored_shot.lower() in equivs or mirrored_shot.lower() == top_shot.lower():
             tta_eval_shot = top_shot
         else:
             tta_eval_shot = mirrored_shot

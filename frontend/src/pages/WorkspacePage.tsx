@@ -19,7 +19,10 @@ import {
   Dumbbell,
   Columns,
   Zap,
-  Loader2
+  Loader2,
+  Info,
+  BookOpen,
+  Target
 } from 'lucide-react';
 import { AnalysisResult, SessionListItem, NavTab } from '../types/cricket';
 import { api } from '../services/api';
@@ -69,6 +72,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
   const [activeMistakeJoint, setActiveMistakeJoint] = useState<string | null>(null);
   const [hasEnded, setHasEnded] = useState<boolean>(false);
   const [isSwitchingStriker, setIsSwitchingStriker] = useState<boolean>(false);
+  const [dismissMismatch, setDismissMismatch] = useState<boolean>(false);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const syncedVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -751,85 +755,38 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
 
   return (
     <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6 space-y-6">
-      {/* Top Session Breadcrumb Bar with Calibrated Shot Confidence Headline */}
+      {/* Top Header: Batting Technique Coach Header with Shot Check Status */}
       <div className="flex flex-col lg:flex-row lg:items-start justify-between gap-4 pb-4 border-b border-[#303438]">
         <div className="space-y-2 flex-1">
           <div className="flex flex-wrap items-center gap-2.5">
-            {confLevelCode === 'cant_tell' ? (
-              <h1 className="text-xl sm:text-2xl font-black text-slate-300 tracking-tight">
-                Shot: <span className="text-slate-400">Can't tell</span>{' '}
-                <span className="text-sm font-semibold text-[#A5A9AD]">({confPct}%)</span>
-              </h1>
-            ) : (
-              <h1 className="text-xl sm:text-2xl font-black text-[#F5F5F5] tracking-tight">
-                {analysis?.predicted_shot_type || analysis?.shot_type}:{' '}
-                <span className={confColor}>{confLevel}</span>{' '}
-                <span className="text-sm font-semibold text-[#A5A9AD]">({confPct}%)</span>
-              </h1>
-            )}
+            <h1 className="text-xl sm:text-2xl font-black text-[#F5F5F5] tracking-tight">
+              Batting Analysis: <span className="text-[#7FEA35]">{analysis.shot_type}</span>
+            </h1>
 
-            <span className={`text-xs font-mono px-2 py-0.5 rounded border font-bold ${confBadgeClass}`}>
-              {confLevel}
-            </span>
+            {/* Shot Check Status Badge */}
+            {analysis.shot_check_status === 'confirmed' ? (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30">
+                <CheckCircle2 className="w-3.5 h-3.5" />
+                <span>Shot confirmed</span>
+              </span>
+            ) : analysis.shot_check_status === 'mismatch' ? (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-amber-500/15 text-amber-300 border border-amber-500/30">
+                <AlertTriangle className="w-3.5 h-3.5" />
+                <span>Shot check: Swing resembles {analysis.predicted_shot_type}</span>
+              </span>
+            ) : (
+              <span className="inline-flex items-center space-x-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-slate-800 text-slate-300 border border-slate-700">
+                <HelpCircle className="w-3.5 h-3.5" />
+                <span>Could not confirm the shot type</span>
+              </span>
+            )}
 
             <span className="text-xs font-mono px-2 py-0.5 rounded bg-[#7FEA35]/15 text-[#7FEA35] border border-[#7FEA35]/30 font-bold">
               {analysis?.session_id}
             </span>
           </div>
 
-          {/* Calibrated Shot Confidence Bar */}
-          <div className="flex items-center space-x-3 max-w-md pt-0.5">
-            <div className="flex-1 h-2 bg-[#181B1D] rounded-full overflow-hidden border border-[#303438]">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${confBarBg}`}
-                style={{ width: `${Math.min(100, Math.max(8, confPct))}%` }}
-              />
-            </div>
-            <button
-              onClick={() => setShowWhyConfidence(!showWhyConfidence)}
-              className="text-[11px] font-mono text-[#A5A9AD] hover:text-[#7FEA35] transition-colors cursor-pointer flex items-center space-x-1"
-            >
-              <span>Why this confidence?</span>
-              <span className="text-[10px]">{showWhyConfidence ? '▲' : '▼'}</span>
-            </button>
-          </div>
-
-          {/* Why this confidence accordion */}
-          {showWhyConfidence && (
-            <div className="p-3 bg-[#111315] rounded-xl border border-[#303438] max-w-lg space-y-1 text-xs text-[#A5A9AD]">
-              <div className="text-[11px] font-bold text-white mb-1">Confidence Breakdown:</div>
-              {confidenceReasons.map((r, i) => (
-                <div key={i} className="flex items-start space-x-2">
-                  <span className="text-[#7FEA35] font-bold">•</span>
-                  <span>{r}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* Top-3 Candidates Pill Buttons */}
-          {candidatePills.length > 0 && (
-            <div className="flex flex-wrap items-center gap-1.5 pt-1">
-              <span className="text-[11px] text-[#A5A9AD] font-semibold mr-1">Candidates:</span>
-              {candidatePills.slice(0, 3).map((cand) => (
-                <button
-                  key={cand.shot}
-                  onClick={() => handleConfirmShot(cand.shot)}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-semibold border transition-all cursor-pointer flex items-center space-x-1.5 ${
-                    (analysis?.predicted_shot_type || analysis?.shot_type) === cand.shot
-                      ? 'bg-[#7FEA35]/20 text-[#7FEA35] border-[#7FEA35]/50'
-                      : 'bg-[#181B1D] text-[#A5A9AD] border-[#303438] hover:text-white hover:border-[#7FEA35]'
-                  }`}
-                  title={`Switch technique analysis to ${cand.shot}`}
-                >
-                  <span>{cand.shot}</span>
-                  <span className="text-[10px] font-mono opacity-80">{cand.pct}%</span>
-                </button>
-              ))}
-            </div>
-          )}
-
-          <p className="text-xs text-[#A5A9AD] pt-1">
+          <p className="text-xs text-[#A5A9AD] pt-0.5">
             Technique Benchmark:{' '}
             <span className="text-white font-bold">{analysis?.shot_type}</span> • Video:{' '}
             <span className="text-[#F5F5F5] font-medium">{analysis?.video_filename}</span> •{' '}
@@ -837,7 +794,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
           </p>
         </div>
 
-        {/* Shot Selection Switcher Dropdown */}
+        {/* Top Action Controls: Session Selector & Tab Shortcuts */}
         <div className="flex flex-wrap items-center gap-2">
           {availableSessions.length > 0 && (
             <div className="flex items-center space-x-2 bg-[#111315] border border-[#303438] px-2.5 py-1 rounded-xl">
@@ -874,10 +831,9 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
         </div>
       </div>
 
-      {/* Shot check: shown only when the classifier is confident the swing looks like another shot.
-          The feedback below always uses the shot the user selected unless they choose to switch. */}
-      {analysis.shot_mismatch_warning && (
-        <div className="p-3.5 rounded-xl bg-amber-950/70 border border-amber-600/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
+      {/* Shot Mismatch Banner: Only shown when confident swing is another shot and user hasn't dismissed */}
+      {!dismissMismatch && analysis.shot_mismatch_warning && (
+        <div className="p-4 rounded-xl bg-amber-950/70 border border-amber-600/70 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs shadow-md">
           <div className="flex items-center space-x-2 text-amber-200">
             <AlertTriangle className="w-5 h-5 text-amber-400 shrink-0" />
             <div>
@@ -897,40 +853,19 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                 Analyse as {analysis.predicted_shot_type}
               </button>
             )}
+            <button
+              onClick={() => setDismissMismatch(true)}
+              className="px-3 py-1.5 rounded-lg bg-[#181B1D] hover:bg-[#25282c] text-white border border-[#303438] font-semibold transition-colors cursor-pointer"
+            >
+              Keep {analysis.shot_type}
+            </button>
           </div>
         </div>
       )}
 
-      {analysis.guidance_note && (
-        <div className="p-3 rounded-xl bg-slate-900/70 border border-slate-700 text-[11px] text-slate-300">
-          {analysis.guidance_note}
-        </div>
-      )}
-
-      {analysis.how_to_play && (analysis.how_to_play.phase_steps?.length || analysis.how_to_play.key_points?.length) ? (
-        <div className="bg-navy-900/80 rounded-xl border border-navy-800 p-4 space-y-2 text-xs">
-          <h4 className="font-semibold text-slate-200 text-sm">How a {analysis.how_to_play.shot} should be played</h4>
-          {analysis.how_to_play.bat_path && (
-            <div className="text-slate-300">Bat path: {analysis.how_to_play.bat_path}</div>
-          )}
-          <ol className="list-decimal list-inside space-y-1 text-slate-300">
-            {analysis.how_to_play.phase_steps.map((step, i) => (
-              <li key={i}>{step}</li>
-            ))}
-          </ol>
-          {analysis.how_to_play.key_points.length > 0 && (
-            <ul className="list-disc list-inside space-y-1 text-slate-400">
-              {analysis.how_to_play.key_points.map((pt, i) => (
-                <li key={i}>{pt}</li>
-              ))}
-            </ul>
-          )}
-        </div>
-      ) : null}
-
-      {/* Striker Isolation & Manual Override */}
+      {/* Striker Isolation & Candidate Overrides */}
       {analysis.striker_isolation_evidence && (
-        <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-3 text-xs">
+        <div className="p-3.5 rounded-xl bg-[#111315] border border-[#303438] space-y-2 text-xs">
           <div className="flex flex-wrap items-center justify-between gap-2">
             <div className="flex items-center space-x-2">
               <span className={`w-2.5 h-2.5 rounded-full ${
@@ -938,9 +873,9 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                   ? 'bg-amber-400 animate-ping'
                   : 'bg-[#7FEA35] animate-pulse'
               }`}></span>
-              <span className="font-bold text-white text-sm">
-                Striker: Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id}{' '}
-                <span className="font-normal text-xs text-[#A5A9AD]">
+              <span className="font-bold text-white text-xs">
+                Striker Locked: Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id}{' '}
+                <span className="font-normal text-[11px] text-[#A5A9AD]">
                   ({analysis.striker_isolation_evidence.selection_method === 'user_specified_track'
                     ? 'User Selected'
                     : `Auto-detected: ${Math.round((analysis.striker_isolation_evidence.confidence ?? 0.85) * 100)}% confidence`})
@@ -955,272 +890,374 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
             )}
           </div>
 
-          {(analysis.striker_isolation_evidence.confidence ?? 0.85) < 0.40 ? (
-            <div className="p-2.5 rounded-lg bg-amber-950/40 border border-amber-600/50 text-amber-200 flex items-center space-x-2">
-              <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0" />
-              <span>No clear striker detected — please select the batter manually from the candidates below.</span>
-            </div>
-          ) : (
-            <p className="text-[11px] text-[#A5A9AD]">
-              Bowler and non-strikers are excluded from kinematic analysis. Skeleton tracking is locked onto Track #{analysis.striker_track_id ?? analysis.striker_isolation_evidence.active_striker_id}.
-            </p>
-          )}
-
-          {/* Candidate Tracks Override Buttons */}
           {((analysis.striker_candidates && analysis.striker_candidates.length > 1) ||
             (analysis.striker_isolation_evidence.all_tracks && Object.keys(analysis.striker_isolation_evidence.all_tracks).length > 1)) && (
-            <div className="space-y-1.5 pt-1 border-t border-[#303438]/60">
-              <span className="text-[11px] font-medium text-[#A5A9AD] block">
-                Detected People in Frame (Click a person to lock tracking onto them):
-              </span>
-              <div className="flex flex-wrap gap-2">
-                {(analysis.striker_candidates || Object.entries(analysis.striker_isolation_evidence.all_tracks || {}).map(([tid, meta]: [string, any]) => ({
-                  track_id: Number(tid),
-                  role: meta.role || 'other',
-                  confidence: meta.confidence || 0.5,
-                  striker_score: meta.striker_score || 0.0,
-                  is_selected: Number(tid) === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id)
-                }))).map((cand: any) => {
-                  const isActive = cand.track_id === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id);
-                  return (
-                    <button
-                      key={cand.track_id}
-                      type="button"
-                      onClick={() => !isActive && !isSwitchingStriker && handleSelectStriker(cand.track_id)}
-                      disabled={isActive || isSwitchingStriker}
-                      className={`px-3 py-1.5 rounded-lg text-xs font-mono font-medium transition-all cursor-pointer flex items-center space-x-1.5 ${
-                        isActive
-                          ? 'bg-[#7FEA35]/15 border-2 border-[#7FEA35] text-[#7FEA35] font-bold shadow'
-                          : 'bg-[#181B1D] border border-[#303438] text-[#F5F5F5] hover:border-[#7FEA35]/60 hover:text-white'
-                      }`}
-                    >
-                      <span>
-                        Person #{cand.track_id} ({cand.role.toUpperCase()})
-                      </span>
-                      {isActive ? (
-                        <span className="text-[10px] px-1 py-0.2 rounded bg-[#7FEA35] text-black font-bold">LOCKED</span>
-                      ) : (
-                        <span className="text-[10px] text-[#A5A9AD]">Select</span>
-                      )}
-                    </button>
-                  );
-                })}
-              </div>
+            <div className="flex flex-wrap items-center gap-2 pt-1 border-t border-[#303438]/60">
+              <span className="text-[11px] text-[#A5A9AD]">Switch Batter:</span>
+              {(analysis.striker_candidates || Object.entries(analysis.striker_isolation_evidence.all_tracks || {}).map(([tid, meta]: [string, any]) => ({
+                track_id: Number(tid),
+                role: meta.role || 'other',
+                confidence: meta.confidence || 0.5,
+                striker_score: meta.striker_score || 0.0,
+                is_selected: Number(tid) === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id)
+              }))).map((cand: any) => {
+                const isActive = cand.track_id === (analysis.striker_track_id ?? analysis.striker_isolation_evidence?.active_striker_id);
+                return (
+                  <button
+                    key={cand.track_id}
+                    type="button"
+                    onClick={() => !isActive && !isSwitchingStriker && handleSelectStriker(cand.track_id)}
+                    disabled={isActive || isSwitchingStriker}
+                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-all cursor-pointer ${
+                      isActive
+                        ? 'bg-[#7FEA35]/15 border border-[#7FEA35] text-[#7FEA35] font-bold'
+                        : 'bg-[#181B1D] border border-[#303438] text-[#A5A9AD] hover:text-white'
+                    }`}
+                  >
+                    Person #{cand.track_id} {isActive ? '(Locked)' : ''}
+                  </button>
+                );
+              })}
             </div>
           )}
+        </div>
+      )}
 
-          {analysis.striker_selection_reason && (
-            <p className="text-xs text-[#7FEA35] bg-[#7FEA35]/10 p-2.5 rounded-lg border border-[#7FEA35]/25">
-              {analysis.striker_selection_reason}
+      {/* SECTION A: How this shot should be played */}
+      <div id="section-how-to-play" className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="w-6 h-6 rounded-lg bg-[#7FEA35]/15 text-[#7FEA35] font-mono font-bold text-xs flex items-center justify-center border border-[#7FEA35]/30">A</span>
+              <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide">
+                How this shot should be played: {analysis.shot_type}
+              </h2>
+            </div>
+            <p className="text-xs text-[#A5A9AD] mt-1">
+              Textbook mechanical execution steps and key body positions for a proper {analysis.shot_type}.
             </p>
+          </div>
+          {analysis.guidance_note && (
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-[#181B1D] text-slate-300 border border-[#303438] max-w-md">
+              {analysis.guidance_note}
+            </span>
           )}
-
-          {/* Biomechanical Cues Snapshot */}
-          <div className="flex flex-wrap items-center gap-2 text-[11px] font-mono pt-1">
-            <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Bat In Hand: {analysis.striker_isolation_evidence.cues?.cue1_bat_in_hand != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue1_bat_in_hand * 100)}%` : 'Verified'}
-            </span>
-            <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Crease Anchor: {analysis.striker_isolation_evidence.cues?.cue2_position_crease != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue2_position_crease * 100)}%` : 'Stable'}
-            </span>
-            <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Rotational Swing: {analysis.striker_isolation_evidence.cues?.cue3_motion_signature != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue3_motion_signature * 100)}%` : 'True'}
-            </span>
-            <span className="px-2 py-0.5 rounded bg-[#181B1D] text-slate-300 border border-[#303438]">
-              Batting Stance: {analysis.striker_isolation_evidence.cues?.cue4_batting_stance != null ? `${Math.round(analysis.striker_isolation_evidence.cues.cue4_batting_stance * 100)}%` : 'Active'}
-            </span>
-          </div>
         </div>
-      )}
 
-      {/* Tracking Dropout Alert */}
-      {analysis.tracking_dropout_warning && (
-        <div className="p-3.5 rounded-xl bg-orange-950/60 border border-orange-700/60 flex items-center space-x-2 text-xs text-orange-200">
-          <ShieldAlert className="w-4 h-4 text-orange-400 shrink-0" />
-          <span>{analysis.tracking_dropout_warning}</span>
-        </div>
-      )}
-
-      {/* Top Candidates Display */}
-      {analysis.shot_classification?.top_candidates && analysis.shot_classification.top_candidates.length > 0 && (
-        <div className="p-3.5 rounded-xl bg-[#111315] border border-[#303438] space-y-2">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-white flex items-center space-x-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-[#7FEA35]" />
-              <span>Possible shot matches</span>
-            </span>
-            <span className="text-[11px] font-mono text-[#A5A9AD]">
-              Stage 1 Family: <strong className="text-sky-400">{(analysis.shot_classification as any).family || 'Evaluated'}</strong>
-            </span>
+        {analysis.how_to_play?.bat_path && (
+          <div className="bg-[#181B1D] p-3 rounded-xl border border-[#303438] text-xs">
+            <span className="font-bold text-[#7FEA35]">Bat Path: </span>
+            <span className="text-slate-200">{analysis.how_to_play.bat_path}</span>
           </div>
-          {(analysis.shot_classification as any).evidence?.length > 0 && (
-            <div className="flex flex-wrap gap-2 pt-1">
-              {(analysis.shot_classification as any).evidence.map((item: string, idx: number) => (
-                <span key={idx} className="px-2 py-1 rounded-md bg-[#181B1D] border border-[#303438] text-[10px] text-[#A5A9AD]">{item}</span>
+        )}
+
+        {analysis.how_to_play?.phase_steps && analysis.how_to_play.phase_steps.length > 0 ? (
+          <div className="space-y-2">
+            <h3 className="text-xs font-mono uppercase tracking-wider text-[#A5A9AD] font-bold">
+              Execution Phases & Key Body Positions
+            </h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-2.5">
+              {analysis.how_to_play.phase_steps.map((step, idx) => (
+                <div key={idx} className="bg-[#181B1D] p-3 rounded-xl border border-[#303438] space-y-1">
+                  <div className="text-[11px] font-mono text-[#7FEA35] font-bold">Step {idx + 1}</div>
+                  <p className="text-xs text-slate-200 leading-relaxed">{step}</p>
+                </div>
               ))}
             </div>
-          )}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
-            {analysis.shot_classification.top_candidates.slice(0, 3).map((cand, idx) => (
-              <div
-                key={cand.shot_name}
-                className={`p-2.5 rounded-lg border flex items-center justify-between ${
-                  idx === 0
-                    ? 'bg-[#7FEA35]/10 border-[#7FEA35]/30 text-white'
-                    : 'bg-[#181B1D] border-[#303438] text-slate-300'
-                }`}
-              >
-                <div className="space-y-0.5">
-                  <div className="text-xs font-bold flex items-center space-x-1.5">
-                    <span className="text-[10px] font-mono text-slate-400">#{idx + 1}</span>
-                    <span>{cand.shot_name}</span>
-                  </div>
-                  <div className="w-24 bg-navy-800 rounded-full h-1.5 overflow-hidden">
-                    <div
-                      className={`h-full ${idx === 0 ? 'bg-[#7FEA35]' : 'bg-sky-400'}`}
-                      style={{ width: `${Math.round(cand.score * 100)}%` }}
-                    />
-                  </div>
-                </div>
-                <div className="text-right">
-                  <span className="text-xs font-mono font-bold text-white">
-                    {Math.round(cand.score * 100)}%
-                  </span>
-                  {idx > 0 && (
-                    <button
-                      onClick={() => handleConfirmShot(cand.shot_name)}
-                      className="block text-[10px] text-sky-400 hover:underline cursor-pointer"
-                    >
-                      Select
-                    </button>
-                  )}
-                </div>
-              </div>
-            ))}
           </div>
-        </div>
-      )}
+        ) : (
+          <p className="text-xs text-slate-400">Step-by-step guidance available for {analysis.shot_type}.</p>
+        )}
 
-      {/* Benchmark Header */}
-      <div className="bg-[#111315] border border-[#303438] rounded-xl px-4 py-2.5 flex flex-col sm:flex-row sm:items-center justify-between gap-2 shadow-sm">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="text-[11px] font-mono uppercase tracking-wider text-[#7FEA35] font-bold px-2 py-0.5 rounded bg-[#7FEA35]/10 border border-[#7FEA35]/25">
-            Benchmark
-          </span>
-          <span className="text-xs font-bold text-[#F5F5F5]">{analysis.shot_type} Ideal Technique</span>
-          <span className="text-[11px] text-[#A5A9AD] hidden sm:inline">• Reference ranges from coaching biomechanics for this shot</span>
-        </div>
-        <span className="text-[10px] font-mono text-[#A5A9AD] bg-[#181B1D] px-2 py-0.5 rounded border border-[#303438]">
-          MCC / Cricket Australia Biomechanical Framework
-        </span>
+        {analysis.how_to_play?.key_points && analysis.how_to_play.key_points.length > 0 && (
+          <div className="pt-2 border-t border-[#303438]/60 space-y-1.5">
+            <h3 className="text-xs font-mono uppercase tracking-wider text-[#A5A9AD] font-bold">
+              Key Technique Cues
+            </h3>
+            <div className="flex flex-wrap gap-2">
+              {analysis.how_to_play.key_points.map((pt, idx) => (
+                <span key={idx} className="text-xs bg-[#181B1D] px-2.5 py-1 rounded-lg border border-[#303438] text-slate-300">
+                  • {pt}
+                </span>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Camera View Notice if Not Standard Side-On */}
-      {analysis.camera_view_warning && (
-        <div className="p-3 rounded-xl bg-sky-950/60 border border-sky-800/60 flex items-center space-x-2 text-xs text-sky-200 shadow-sm">
-          <Eye className="w-4 h-4 text-sky-400 shrink-0" />
-          <span>{analysis.camera_view_warning}</span>
-        </div>
-      )}
-
-      {/* AI Kinematic Classification & Manual Confirmation Banner */}
-      <div className="p-4 rounded-2xl bg-[#111315] border border-[#303438] shadow-lg flex flex-col md:flex-row md:items-center justify-between gap-4">
-        <div className="space-y-1.5">
-          <div className="flex flex-wrap items-center gap-2">
-            <div className="flex items-center space-x-1 px-2.5 py-1 rounded-lg bg-[#7FEA35]/10 border border-[#7FEA35]/30 text-[#7FEA35] text-xs font-mono font-bold">
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>AI Classification: {analysis.predicted_shot_type || analysis.shot_type}</span>
+      {/* SECTION B: What you did */}
+      <div id="section-what-you-did" className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="w-6 h-6 rounded-lg bg-sky-500/15 text-sky-400 font-mono font-bold text-xs flex items-center justify-center border border-sky-500/30">B</span>
+              <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide">
+                What you did: Phase-by-Phase Measurements
+              </h2>
             </div>
-
-            {analysis.prediction_confidence != null && (
-              <span className="px-2 py-0.5 rounded text-[11px] font-mono bg-[#181B1D] border border-[#303438] text-[#F5F5F5]">
-                Confidence: <strong className="text-[#7FEA35]">{Math.round((analysis.prediction_confidence || 0) * 100)}%</strong>
-              </span>
-            )}
-
-            {analysis.user_confirmed_shot_type ? (
-              <span className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-950/80 text-emerald-400 border border-emerald-800">
-                <CheckCircle2 className="w-3 h-3" />
-                <span>Confirmed by User: {analysis.user_confirmed_shot_type}</span>
-              </span>
-            ) : analysis.shot_classification?.is_uncertain ? (
-              <span className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono bg-amber-950/80 text-amber-400 border border-amber-800">
-                <AlertTriangle className="w-3 h-3" />
-                <span>Ambiguous Kinematics</span>
-              </span>
-            ) : (
-              <span className="flex items-center space-x-1 px-2 py-0.5 rounded text-[11px] font-mono bg-sky-950/80 text-sky-400 border border-sky-800">
-                <Check className="w-3 h-3" />
-                <span>Kinematic Match</span>
-              </span>
-            )}
+            <p className="text-xs text-[#A5A9AD] mt-1">
+              Your measured body angles across each stroke phase, compared against {analysis.shot_type} ideal benchmark ranges.
+            </p>
           </div>
-
-          <p className="text-xs text-[#A5A9AD] leading-relaxed max-w-3xl">
-            {analysis.shot_classification?.rationale ||
-              `Evaluated against 2D landmark trajectories (lead knee flexion, rear knee drop, stride expansion, and torso tilt). Current active shot: ${analysis.shot_type}.`}
-          </p>
+          <div className="text-[11px] font-mono text-sky-300 bg-sky-950/40 border border-sky-800/60 px-3 py-1.5 rounded-xl">
+            Camera angle caveat: Evaluated from {analysis.camera_angle || 'side-on'} view. Metrics not reliable from this view are marked 'not measurable from this angle'.
+          </div>
         </div>
 
-        {/* Shot Confirmation / Override Controls */}
-        <div className="flex items-center gap-2 shrink-0">
-          {!showOverrideSelect ? (
-            <div className="flex items-center gap-2">
-              {!analysis.user_confirmed_shot_type && (
-                <button
-                  onClick={() => handleConfirmShot(analysis.predicted_shot_type || analysis.shot_type)}
-                  disabled={isConfirmingShot}
-                  className="px-3 py-1.5 rounded-lg bg-[#7FEA35] hover:bg-[#94EE58] text-[#050505] text-xs font-bold transition-colors cursor-pointer flex items-center space-x-1.5 shadow-sm"
+        <div className="overflow-x-auto">
+          <table className="w-full text-left text-xs border-collapse">
+            <thead>
+              <tr className="border-b border-[#303438] text-[11px] font-mono uppercase text-[#A5A9AD]">
+                <th className="py-2.5 px-3">Phase</th>
+                <th className="py-2.5 px-3">Metric</th>
+                <th className="py-2.5 px-3 text-right">What You Did</th>
+                <th className="py-2.5 px-3 text-right">Ideal Range</th>
+                <th className="py-2.5 px-3 text-center">Status</th>
+                <th className="py-2.5 px-3 text-center">Data Validity</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#1e2226] font-mono">
+              {analysis.metric_comparison_table && analysis.metric_comparison_table.length > 0 ? (
+                analysis.metric_comparison_table.map((row, rIdx) => {
+                  const isOk = row.verdict === 'OK';
+                  const isLow = row.verdict === 'Too Low';
+                  const isHigh = row.verdict === 'Too High';
+                  const isUnavail = row.verdict === 'not measurable from this angle' || row.validity === 'UNAVAILABLE';
+
+                  return (
+                    <tr
+                      key={rIdx}
+                      onClick={() => {
+                        if (row.timestamp_sec != null) {
+                          handleSeekFrame(findFrameIndex(row.timestamp_sec));
+                        } else if (row.frame_index != null) {
+                          handleSeekFrame(row.frame_index);
+                        }
+                      }}
+                      className="hover:bg-[#181B1D]/80 transition-colors cursor-pointer"
+                      title="Click to seek to this phase frame in the video"
+                    >
+                      <td className="py-2.5 px-3 font-semibold text-[#F5F5F5]">{row.phase_label}</td>
+                      <td className="py-2.5 px-3 text-slate-300 font-sans">{row.metric_name}</td>
+                      <td className="py-2.5 px-3 text-right font-bold">
+                        {isUnavail ? (
+                          <span className="text-slate-500 font-sans italic text-[11px]">not measurable from this angle</span>
+                        ) : (
+                          <span className="text-white">
+                            {row.yours_formatted}{' '}
+                            {row.timestamp_sec != null && (
+                              <span className="text-[10px] text-[#A5A9AD] font-normal">(@ {row.timestamp_sec}s)</span>
+                            )}
+                          </span>
+                        )}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-[#A5A9AD]">{row.ideal_range}</td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
+                          isOk
+                            ? 'bg-[#7FEA35]/15 text-[#7FEA35] border-[#7FEA35]/30'
+                            : isLow
+                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
+                            : isHigh
+                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
+                            : 'bg-slate-800 text-slate-400 border-slate-700'
+                        }`}>
+                          {isOk ? 'Within Range' : isUnavail ? 'N/A' : 'Needs Work'}
+                        </span>
+                      </td>
+                      <td className="py-2.5 px-3 text-center">
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded font-mono ${
+                          row.validity === 'MEASURED'
+                            ? 'bg-[#181B1D] text-emerald-400 border border-emerald-900/50'
+                            : row.validity === 'MODEL_INFERRED'
+                            ? 'bg-[#181B1D] text-purple-400 border border-purple-900/50'
+                            : row.validity === 'ESTIMATED'
+                            ? 'bg-[#181B1D] text-amber-400 border border-amber-900/50'
+                            : 'bg-[#181B1D] text-slate-500 border border-slate-800'
+                        }`}>
+                          {row.validity}
+                        </span>
+                      </td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="py-4 text-center text-slate-500">
+                    No comparison metrics available for this session.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* SECTION C: Your mistakes */}
+      <div id="section-mistakes" className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="w-6 h-6 rounded-lg bg-amber-500/15 text-amber-400 font-mono font-bold text-xs flex items-center justify-center border border-amber-500/30">C</span>
+              <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide">
+                Your mistakes (Top Technical Faults)
+              </h2>
+            </div>
+            <p className="text-xs text-[#A5A9AD] mt-1">
+              Top faults ranked by importance: what went wrong, measured vs ideal, why it matters, and how to fix it.
+            </p>
+          </div>
+          <span className="text-[11px] font-mono text-[#A5A9AD] bg-[#181B1D] px-2.5 py-1 rounded border border-[#303438]">
+            {topMistakes.length} Detected Faults
+          </span>
+        </div>
+
+        {topMistakes.length > 0 ? (
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            {topMistakes.map((m, idx) => {
+              const detectedJoint = getJointFromMistake(m.title + ' ' + (m.measurement || '') + ' ' + (m.why_it_matters || ''));
+              const isSelectedFault = activeMistakeJoint === detectedJoint && detectedJoint !== null;
+              return (
+                <div
+                  key={m.id || idx}
+                  onClick={() => {
+                    if (m.timestamp_sec != null) {
+                      handleSeekFrame(findFrameIndex(m.timestamp_sec));
+                    } else if (m.frame_index != null) {
+                      handleSeekFrame(m.frame_index);
+                    }
+                    setActiveMistakeJoint(detectedJoint);
+                  }}
+                  className={`rounded-xl border p-4 space-y-3 flex flex-col justify-between cursor-pointer transition-all ${
+                    isSelectedFault
+                      ? 'bg-[#181B1D] border-[#7FEA35] shadow-[0_0_15px_rgba(127,234,53,0.15)] ring-1 ring-[#7FEA35]'
+                      : 'bg-[#181B1D] border-[#303438] hover:border-[#7FEA35]/50 hover:bg-[#1a1e22]'
+                  }`}
                 >
-                  <CheckCircle2 className="w-3.5 h-3.5" />
-                  <span>Confirm as {analysis.predicted_shot_type || analysis.shot_type}</span>
+                  <div className="space-y-2.5">
+                    <div className="flex items-start justify-between gap-2">
+                      <span className="text-[10px] font-mono font-bold px-2 py-0.5 rounded border bg-amber-500/15 text-amber-400 border-amber-500/30">
+                        Fault #{idx + 1} • {m.phase}
+                      </span>
+                      {m.measurement_provenance && (
+                        <span className="text-[10px] font-mono text-[#A5A9AD]">
+                          {m.measurement_provenance}
+                        </span>
+                      )}
+                    </div>
+                    {m.thumbnail_path && (
+                      <div className="rounded-lg overflow-hidden border border-[#303438] aspect-video bg-black">
+                        <img
+                          src={api.getVideoUrl(m.thumbnail_path)}
+                          alt={m.title}
+                          className="w-full h-full object-cover"
+                        />
+                      </div>
+                    )}
+                    <h4 className="text-sm font-bold text-[#F5F5F5]">{m.title}</h4>
+                    <div className="text-[11px] font-mono text-slate-300 bg-[#111315] p-2.5 rounded-lg border border-[#303438] space-y-1">
+                      <div>What went wrong: <strong className="text-white">{m.measurement}</strong></div>
+                      <div className="text-[#A5A9AD]">Ideal benchmark: {m.reference_benchmark || m.observed_value}</div>
+                    </div>
+                    <div>
+                      <span className="text-[11px] font-bold text-slate-300 block mb-0.5">Why it matters:</span>
+                      <p className="text-xs text-[#A5A9AD] leading-relaxed">{m.why_it_matters}</p>
+                    </div>
+                  </div>
+                  <div className="pt-2.5 border-t border-[#303438] text-xs">
+                    <div className="flex items-start space-x-1.5 text-xs text-[#7FEA35]">
+                      <Dumbbell className="w-4 h-4 shrink-0 mt-0.5" />
+                      <div>
+                        <strong className="text-[#F5F5F5] font-semibold">Fix / Drill: </strong>
+                        <span>{m.practical_drill}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        ) : (
+          <div className="p-4 rounded-xl bg-[#181B1D] border border-[#303438] text-center text-xs text-slate-400">
+            No major technical faults identified. Technique aligns with ideal benchmark ranges for {analysis.shot_type}.
+          </div>
+        )}
+      </div>
+
+      {/* SECTION D: The one thing to fix first */}
+      <div id="section-fix-first" className="bg-[#111315] rounded-2xl border-2 border-[#7FEA35]/60 p-5 space-y-3 shadow-lg bg-gradient-to-r from-[#111315] via-[#151c14] to-[#111315]">
+        <div className="flex items-center space-x-2">
+          <span className="w-6 h-6 rounded-lg bg-[#7FEA35] text-black font-mono font-bold text-xs flex items-center justify-center">D</span>
+          <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide flex items-center space-x-2">
+            <Target className="w-4 h-4 text-[#7FEA35]" />
+            <span>The One Thing To Fix First</span>
+          </h2>
+        </div>
+        {topMistakes.length > 0 ? (
+          <div className="space-y-3 pt-1">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div className="text-sm font-bold text-[#7FEA35] flex items-center space-x-2">
+                <span>Priority #1: {topMistakes[0].title}</span>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-amber-500/15 text-amber-400 border border-amber-500/30">
+                  {topMistakes[0].phase} Phase
+                </span>
+              </div>
+              {topMistakes[0].timestamp_sec != null && (
+                <button
+                  onClick={() => handleSeekFrame(findFrameIndex(topMistakes[0].timestamp_sec!))}
+                  className="text-xs font-mono text-[#7FEA35] hover:underline cursor-pointer flex items-center space-x-1"
+                >
+                  <span>Jump to Fault Moment (@ {topMistakes[0].timestamp_sec}s)</span>
+                  <ArrowRight className="w-3.5 h-3.5" />
                 </button>
               )}
-              <button
-                onClick={() => setShowOverrideSelect(true)}
-                className="px-3 py-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#F5F5F5] text-xs font-semibold border border-[#303438] transition-colors cursor-pointer flex items-center space-x-1.5"
-              >
-                <Edit3 className="w-3.5 h-3.5 text-[#A5A9AD]" />
-                <span>Override Shot Type</span>
-              </button>
             </div>
-          ) : (
-            <div className="flex items-center gap-2 bg-[#181B1D] p-1.5 rounded-xl border border-[#303438]">
-              <select
-                value={overrideShot}
-                onChange={(e) => setOverrideShot(e.target.value)}
-                className="bg-[#111315] text-[#F5F5F5] text-xs border border-[#303438] rounded-lg px-2.5 py-1 focus:outline-none focus:border-[#7FEA35]"
-              >
-                {availableShotsList.map((shotName) => (
-                  <option key={shotName} value={shotName}>
-                    {shotName}
-                  </option>
-                ))}
-              </select>
-              <button
-                onClick={() => handleConfirmShot(overrideShot)}
-                disabled={isConfirmingShot}
-                className="px-3 py-1 rounded-lg bg-[#7FEA35] hover:bg-[#94EE58] text-[#050505] text-xs font-bold transition-colors cursor-pointer"
-              >
-                {isConfirmingShot ? 'Saving...' : 'Save'}
-              </button>
-              <button
-                onClick={() => setShowOverrideSelect(false)}
-                className="px-2 py-1 rounded-lg bg-[#111315] text-[#A5A9AD] hover:text-[#F5F5F5] text-xs"
-              >
-                Cancel
-              </button>
+
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 text-xs">
+              <div className="bg-[#181B1D] p-3 rounded-xl border border-[#303438] space-y-1">
+                <div className="font-bold text-slate-200">Why this is your top priority:</div>
+                <p className="text-slate-400 leading-relaxed">{topMistakes[0].why_it_matters}</p>
+              </div>
+              <div className="bg-[#181B1D] p-3 rounded-xl border border-[#7FEA35]/30 space-y-1">
+                <div className="font-bold text-[#7FEA35] flex items-center space-x-1.5">
+                  <Dumbbell className="w-3.5 h-3.5" />
+                  <span>Recommended Correction Drill:</span>
+                </div>
+                <p className="text-slate-200 leading-relaxed">{topMistakes[0].practical_drill}</p>
+              </div>
             </div>
-          )}
-        </div>
+          </div>
+        ) : (
+          <p className="text-xs text-slate-300">
+            Great execution! No major technical corrections required for this {analysis.shot_type}.
+          </p>
+        )}
       </div>
 
-      {/* Coach Report: Prominent Overall Technique Score & Top 3 Mistakes */}
-      <div className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4">
-        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 pb-4 border-b border-[#303438]">
-          <div className="flex items-center space-x-4">
+      {/* SECTION E: Your score */}
+      <div id="section-scores" className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="w-6 h-6 rounded-lg bg-emerald-500/15 text-emerald-400 font-mono font-bold text-xs flex items-center justify-center border border-emerald-500/30">E</span>
+              <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide">
+                Your Technique Score
+              </h2>
+            </div>
+            <p className="text-xs text-[#A5A9AD] mt-1">
+              Calculated strictly from measured kinematic values against ideal ranges for {analysis.shot_type} (no invented numbers).
+            </p>
+          </div>
+          <span className="text-[11px] font-mono text-[#A5A9AD] bg-[#181B1D] px-2.5 py-1 rounded border border-[#303438]">
+            Overall & Per-Phase Scores (0–100)
+          </span>
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-5 items-center">
+          {/* Overall Score Dial/Box */}
+          <div className="flex items-center space-x-4 bg-[#181B1D] p-4 rounded-xl border border-[#303438]">
             <div
-              className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-black border ${
+              className={`w-16 h-16 rounded-2xl flex flex-col items-center justify-center font-black border shrink-0 ${
                 overallScore != null && overallScore >= 80
                   ? 'bg-[#7FEA35]/15 text-[#7FEA35] border-[#7FEA35]/30'
                   : overallScore != null && overallScore >= 65
@@ -1234,301 +1271,158 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
               <span className="text-[10px] font-mono uppercase tracking-wider text-[#A5A9AD]">/ 100</span>
             </div>
             <div>
-              <div className="flex items-center space-x-2">
-                <h2 className="text-lg font-black text-[#F5F5F5] uppercase tracking-tight">Coach Technique Score</h2>
-                <span
-                  className={`text-[11px] font-mono font-bold px-2 py-0.5 rounded border ${
-                    overallScore != null && overallScore >= 85
-                      ? 'bg-[#7FEA35]/15 text-[#7FEA35] border-[#7FEA35]/30'
-                      : overallScore != null && overallScore >= 70
-                      ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                      : overallScore != null
-                      ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                      : 'bg-slate-800/50 text-slate-400 border-[#303438]'
-                  }`}
-                >
-                  {overallScore == null
-                    ? 'Not available'
-                    : overallScore >= 85
-                    ? 'Textbook Technique'
-                    : overallScore >= 70
-                    ? 'Solid Baseline'
-                    : 'Needs Technical Attention'}
-                </span>
-              </div>
-              <p className="text-xs text-[#A5A9AD] mt-0.5">
+              <div className="text-xs font-mono uppercase tracking-wider text-[#A5A9AD] font-bold">Overall Rating</div>
+              <div className="text-sm font-bold text-white mt-0.5">
                 {overallScore == null
-                  ? `No supported reference range is available for ${analysis.shot_type}.`
-                  : <>Evaluated against the available biomechanical reference ranges for <strong className="text-[#F5F5F5]">{analysis.shot_type}</strong>.</>}
-              </p>
+                  ? 'Not available'
+                  : overallScore >= 85
+                  ? 'Textbook Technique'
+                  : overallScore >= 70
+                  ? 'Solid Baseline'
+                  : 'Needs Technical Attention'}
+              </div>
+              <div className="text-[11px] text-[#A5A9AD] mt-0.5">
+                Target: {analysis.shot_type}
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Top 3 Mistakes Cards */}
-        {topMistakes.length > 0 && (
-          <div className="space-y-2">
-            <h3 className="text-xs font-mono uppercase tracking-wider text-[#A5A9AD] font-bold flex items-center space-x-1.5">
-              <span>Primary Technique Faults & Corrective Drills</span>
-            </h3>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              {topMistakes.map((m, idx) => {
-                const detectedJoint = getJointFromMistake(m.title + ' ' + (m.measurement || '') + ' ' + (m.why_it_matters || ''));
-                const isSelectedFault = activeMistakeJoint === detectedJoint && detectedJoint !== null;
-                return (
-                  <div
-                    key={m.id || idx}
-                    onClick={() => {
-                      if (m.timestamp_sec != null) {
-                        handleSeekFrame(findFrameIndex(m.timestamp_sec));
-                      } else if (m.frame_index != null) {
-                        handleSeekFrame(m.frame_index);
-                      }
-                      setActiveMistakeJoint(detectedJoint);
-                    }}
-                    className={`rounded-xl border p-3.5 space-y-2 flex flex-col justify-between cursor-pointer transition-all ${
-                      isSelectedFault
-                        ? 'bg-[#181B1D] border-[#7FEA35] shadow-[0_0_15px_rgba(127,234,53,0.15)] ring-1 ring-[#7FEA35]'
-                        : 'bg-[#181B1D] border-[#303438] hover:border-[#7FEA35]/50 hover:bg-[#1a1e22]'
-                    }`}
-                  >
-                    <div className="space-y-2">
-                      <div className="flex items-start justify-between gap-2">
-                        <span className={`text-[10px] font-mono font-bold px-1.5 py-0.5 rounded border ${
-                          m.severity === 'strength'
-                            ? 'bg-[#7FEA35]/15 text-[#7FEA35] border-[#7FEA35]/30'
-                            : 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                        }`}>
-                          {m.severity === 'strength' ? 'Optimal Technique' : `Fault #${idx + 1} • ${m.phase}`}
-                        </span>
-                        {m.measurement_provenance && (
-                          <span className="text-[10px] font-mono text-[#A5A9AD]">
-                            {m.measurement_provenance}
-                          </span>
-                        )}
-                      </div>
-                      {m.thumbnail_path && (
-                        <div className="rounded-lg overflow-hidden border border-[#303438] aspect-video bg-black">
-                          <img
-                            src={api.getVideoUrl(m.thumbnail_path)}
-                            alt={m.title}
-                            className="w-full h-full object-cover"
-                          />
-                        </div>
-                      )}
-                      <h4 className="text-xs font-bold text-[#F5F5F5]">{m.title}</h4>
-                      <div className="text-[11px] font-mono text-slate-300 bg-[#111315] p-2 rounded border border-[#303438]">
-                        <div>Measured: <strong className="text-white">{m.measurement}</strong></div>
-                        <div className="text-[#A5A9AD]">Ideal: {m.reference_benchmark || m.observed_value}</div>
-                      </div>
-                      <p className="text-xs text-[#A5A9AD] leading-relaxed">{m.why_it_matters}</p>
+          {/* Per-Phase Breakdown Bars */}
+          <div className="md:col-span-2 bg-[#181B1D] p-4 rounded-xl border border-[#303438] space-y-2.5">
+            <div className="text-xs font-mono uppercase tracking-wider text-[#A5A9AD] font-bold">
+              Per-Phase Breakdown
+            </div>
+            <div className="space-y-2">
+              {analysis.phase_scores && Object.keys(analysis.phase_scores).length > 0 ? (
+                Object.entries(analysis.phase_scores).map(([phase, score]) => (
+                  <div key={phase} className="space-y-1">
+                    <div className="flex justify-between text-xs font-mono">
+                      <span className="text-slate-300 capitalize">{phase.replace('_', ' ')}</span>
+                      <span className="text-white font-bold">{score} / 100</span>
                     </div>
-                    <div className="pt-2 border-t border-[#303438] text-xs">
-                      <div className="flex items-start space-x-1.5 text-xs text-[#7FEA35]">
-                        <Dumbbell className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                        <div>
-                          <strong className="text-[#F5F5F5] font-semibold">Drill: </strong>
-                          <span>{m.practical_drill}</span>
-                        </div>
-                      </div>
+                    <div className="h-2 bg-[#111315] rounded-full overflow-hidden border border-[#303438]">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${
+                          score >= 80 ? 'bg-[#7FEA35]' : score >= 65 ? 'bg-amber-400' : 'bg-rose-500'
+                        }`}
+                        style={{ width: `${Math.min(100, Math.max(5, score))}%` }}
+                      />
                     </div>
                   </div>
-                );
-              })}
+                ))
+              ) : (
+                <p className="text-xs text-slate-400">Phase-level technique scores evaluated.</p>
+              )}
             </div>
-          </div>
-        )}
-      </div>
-
-
-      {/* Metric Comparison Table */}
-      {analysis.metric_comparison_table && analysis.metric_comparison_table.length > 0 && (
-        <div className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-3">
-          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
-            <div>
-              <h3 className="text-xs font-mono uppercase tracking-wider text-[#F5F5F5] font-bold flex items-center space-x-2">
-                <Layers className="w-4 h-4 text-[#7FEA35]" />
-                <span>Phase-by-Phase Metric Comparison Table</span>
-              </h3>
-              <p className="text-[11px] text-[#A5A9AD] mt-0.5">
-                Every evaluated kinematic metric across stroke phases compared directly to {analysis.shot_type} reference benchmark ranges.
-              </p>
-            </div>
-            <span className="text-[11px] font-mono text-[#A5A9AD] bg-[#181B1D] px-2.5 py-1 rounded border border-[#303438]">
-              {analysis.metric_comparison_table.length} Parameters Evaluated
-            </span>
-          </div>
-
-          <div className="overflow-x-auto">
-            <table className="w-full text-left text-xs border-collapse">
-              <thead>
-                <tr className="border-b border-[#303438] text-[11px] font-mono uppercase text-[#A5A9AD]">
-                  <th className="py-2.5 px-3">Phase</th>
-                  <th className="py-2.5 px-3">Metric</th>
-                  <th className="py-2.5 px-3 text-right">Yours</th>
-                  <th className="py-2.5 px-3 text-right">Ideal Range</th>
-                  <th className="py-2.5 px-3 text-center">Verdict</th>
-                  <th className="py-2.5 px-3 text-center">Validity</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-[#1e2226] font-mono">
-                {analysis.metric_comparison_table.map((row, rIdx) => {
-                  const isOk = row.verdict === 'OK';
-                  const isLow = row.verdict === 'Too Low';
-                  const isHigh = row.verdict === 'Too High';
-
-                  return (
-                    <tr key={rIdx} className="hover:bg-[#181B1D]/60 transition-colors">
-                      <td className="py-2 px-3 font-semibold text-[#F5F5F5]">{row.phase_label}</td>
-                      <td className="py-2 px-3 text-slate-300 font-sans">{row.metric_name}</td>
-                      <td className="py-2 px-3 text-right font-bold text-white">
-                        {row.yours_formatted}
-                      </td>
-                      <td className="py-2 px-3 text-right text-[#A5A9AD]">{row.ideal_range}</td>
-                      <td className="py-2 px-3 text-center">
-                        <span className={`inline-block px-2 py-0.5 rounded text-[10px] font-bold border ${
-                          isOk
-                            ? 'bg-[#7FEA35]/15 text-[#7FEA35] border-[#7FEA35]/30'
-                            : isLow
-                            ? 'bg-amber-500/15 text-amber-400 border-amber-500/30'
-                            : isHigh
-                            ? 'bg-rose-500/15 text-rose-400 border-rose-500/30'
-                            : 'bg-slate-800 text-slate-400 border-slate-700'
-                        }`}>
-                          {row.verdict}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <span className="text-[10px] text-[#A5A9AD]">{row.validity}</span>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
           </div>
         </div>
-      )}
+      </div>
 
-      {/* Main Grid: Video Player + HUD on Left, Key Summary Metrics on Right */}
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-        {/* Left Column: Video Workspace & Controls */}
-        <div className="lg:col-span-2 space-y-4">
-          {/* Top Video Toolbar: View Mode & Overlay Toggles */}
-          <div className="bg-[#111315] border border-[#303438] rounded-xl px-3.5 py-2 flex flex-wrap items-center justify-between gap-2 shadow-sm text-xs">
-            {/* View Mode & Video Source Switcher */}
-            <div className="flex items-center space-x-1.5">
-              <button
-                onClick={() => setViewMode('single')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer ${
-                  viewMode === 'single'
-                    ? 'bg-[#7FEA35] text-[#050505] font-bold shadow-sm'
-                    : 'text-[#A5A9AD] hover:text-[#F5F5F5] bg-[#181B1D]'
-                }`}
-                title="Single Player with Dynamic Canvas Overlay"
-              >
-                Single Player
-              </button>
-              <button
-                onClick={() => setViewMode('synced')}
-                className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all cursor-pointer flex items-center space-x-1 ${
-                  viewMode === 'synced'
-                    ? 'bg-[#7FEA35] text-[#050505] font-bold shadow-sm'
-                    : 'text-[#A5A9AD] hover:text-[#F5F5F5] bg-[#181B1D]'
-                }`}
-                title="Synchronized Side-by-Side: Original with Overlay vs Annotated"
-              >
-                <Columns className="w-3.5 h-3.5" />
-                <span>Side-by-Side Synced</span>
-              </button>
-
-              {viewMode === 'single' && (
-                <div className="ml-2 pl-2 border-l border-[#303438] flex items-center space-x-1">
-                  <button
-                    onClick={() => { setSingleSource('original'); setOriginalOnly(false); }}
-                    className={`px-2 py-0.5 rounded text-[11px] font-mono transition-all cursor-pointer ${
-                      singleSource === 'original' && !originalOnly
-                        ? 'bg-sky-500/20 text-sky-300 border border-sky-500/40 font-bold'
-                        : 'text-[#A5A9AD] hover:text-white'
-                    }`}
-                  >
-                    Original + Overlay
-                  </button>
-                  {annotatedVideoUrl && (
-                    <button
-                      onClick={() => setSingleSource('annotated')}
-                      className={`px-2 py-0.5 rounded text-[11px] font-mono transition-all cursor-pointer ${
-                        singleSource === 'annotated'
-                          ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
-                          : 'text-[#A5A9AD] hover:text-white'
-                      }`}
-                    >
-                      Annotated MP4
-                    </button>
-                  )}
-                </div>
-              )}
+      {/* SECTION F: Side-by-side */}
+      <div id="section-side-by-side" className="bg-[#111315] rounded-2xl border border-[#303438] p-5 space-y-4 shadow-sm">
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-[#303438]">
+          <div>
+            <div className="flex items-center space-x-2">
+              <span className="w-6 h-6 rounded-lg bg-purple-500/15 text-purple-400 font-mono font-bold text-xs flex items-center justify-center border border-purple-500/30">F</span>
+              <h2 className="text-base font-bold text-[#F5F5F5] uppercase tracking-wide">
+                Side-by-Side Video & Reference Analysis
+              </h2>
             </div>
-
-            {/* Overlays and Visual Guides Toggles */}
-            <div className="flex flex-wrap items-center gap-1.5">
-              <button
-                onClick={() => {
-                  setOriginalOnly(!originalOnly);
-                  if (!originalOnly) {
-                    setShowSkeletonOverlay(false);
-                    setShowAngles(false);
-                  } else {
-                    setShowSkeletonOverlay(true);
-                    setShowAngles(true);
-                  }
-                }}
-                className={`px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer ${
-                  originalOnly
-                    ? 'bg-[#7FEA35] text-[#050505] border-[#7FEA35] font-bold'
-                    : 'bg-[#181B1D] text-[#A5A9AD] border-[#303438] hover:text-white'
-                }`}
-                title="Toggle Original Video Only (No Overlays)"
-              >
-                Original Only
-              </button>
-
-              {!originalOnly && (
-                <>
-                  <button
-                    onClick={() => setShowSkeletonOverlay(!showSkeletonOverlay)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer ${
-                      showSkeletonOverlay
-                        ? 'bg-brand-500/20 text-brand-400 border-brand-500/40 font-bold'
-                        : 'bg-[#181B1D] text-[#A5A9AD] border-[#303438] hover:text-white'
-                    }`}
-                    title="Toggle Striker Skeleton Lines"
-                  >
-                    Skeleton: {showSkeletonOverlay ? 'ON' : 'OFF'}
-                  </button>
-
-                  <button
-                    onClick={() => setShowAngles(!showAngles)}
-                    className={`px-2 py-1 rounded-md text-[11px] font-mono border transition-all cursor-pointer ${
-                      showAngles
-                        ? 'bg-sky-500/20 text-sky-400 border-sky-500/40 font-bold'
-                        : 'bg-[#181B1D] text-[#A5A9AD] border-[#303438] hover:text-white'
-                    }`}
-                    title="Toggle Joint Angle Arcs & Readings"
-                  >
-                    Angles: {showAngles ? 'ON' : 'OFF'}
-                  </button>
-                </>
-              )}
-            </div>
+            <p className="text-xs text-[#A5A9AD] mt-1">
+              Your stroke footage synchronized alongside reference mechanics or annotated pose overlays.
+            </p>
           </div>
 
-          {/* Video Player Display: Single or Synced Side-by-Side */}
-          {viewMode === 'single' ? (
-            <div className="relative rounded-2xl overflow-hidden bg-black border border-navy-800 shadow-2xl aspect-video flex items-center justify-center group">
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={() => setViewMode('single')}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer ${
+                viewMode === 'single' ? 'bg-[#7FEA35] text-black font-bold' : 'bg-[#181B1D] text-slate-300'
+              }`}
+            >
+              Single Player
+            </button>
+            <button
+              onClick={() => setViewMode('synced')}
+              className={`px-3 py-1 rounded-lg text-xs font-semibold cursor-pointer flex items-center space-x-1 ${
+                viewMode === 'synced' ? 'bg-[#7FEA35] text-black font-bold' : 'bg-[#181B1D] text-slate-300'
+              }`}
+            >
+              <Columns className="w-3.5 h-3.5" />
+              <span>Side-by-Side Synced</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Video Player Display: Single or Synced Side-by-Side */}
+        {viewMode === 'single' ? (
+          <div className="relative rounded-2xl overflow-hidden bg-black border border-navy-800 shadow-2xl aspect-video flex items-center justify-center group">
+            <video
+              ref={videoRef}
+              src={primaryVideoSource}
+              onEnded={() => {
+                setIsPlaying(false);
+                setHasEnded(true);
+              }}
+              onPlay={() => {
+                setIsPlaying(true);
+                setHasEnded(false);
+              }}
+              onPause={() => setIsPlaying(false)}
+              className="w-full h-full object-contain"
+              playsInline
+            />
+
+            {/* Client-Side Canvas Skeleton Overlay */}
+            <canvas
+              ref={overlayCanvasRef}
+              className="absolute inset-0 w-full h-full pointer-events-none z-[4]"
+            />
+
+            {/* In-Video Live Replay Overlay ONLY when video reaches true end */}
+            {hasEnded && (
+              <div className="absolute inset-0 bg-navy-950/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3 z-10 animate-in fade-in duration-200">
+                <button
+                  onClick={handleReplay}
+                  className="flex items-center space-x-2 px-6 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-navy-950 font-black text-sm shadow-2xl shadow-brand-500/30 transform hover:scale-105 active:scale-95 transition-all cursor-pointer"
+                >
+                  <RotateCcw className="w-5 h-5 stroke-[2.5]" />
+                  <span>Replay Practice Stroke</span>
+                </button>
+                <p className="text-xs text-slate-300 font-mono">Press Space or 'R' to replay</p>
+              </div>
+            )}
+
+            {/* In-Video Live HUD Overlay */}
+            {!originalOnly && (
+              <div className="absolute top-3 left-3 bg-navy-950/85 backdrop-blur-md border border-navy-800 px-3 py-2 rounded-xl text-xs font-mono space-y-0.5 shadow-lg pointer-events-none z-[5]">
+                <div className="text-brand-400 font-bold flex items-center space-x-1.5">
+                  <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
+                  <span>Phase: {currentPhase}</span>
+                </div>
+                <div className="text-slate-300 text-[11px]">
+                  Knee: <strong className="text-white">{currentMetric.lead_knee_angle ?? '--'}°</strong> | Elbow: <strong className="text-white">{currentMetric.lead_elbow_angle ?? '--'}°</strong> | Lean: <strong className="text-white">{currentMetric.torso_inclination ?? '--'}°</strong>
+                </div>
+                {currentMetric.bat_detected && currentMetric.bat_angle_deg !== null && (
+                  <div className="text-amber-400 text-[10px] flex items-center space-x-1">
+                    <span>Bat: <strong>{currentMetric.bat_angle_deg}°</strong></span>
+                    {currentMetric.bat_speed_norm && (
+                      <span>• Speed: <strong>{Number(currentMetric.bat_speed_norm).toFixed(1)}</strong></span>
+                    )}
+                    {currentMetric.ball_detected && <span className="text-rose-400">• Ball in frame</span>}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        ) : (
+          /* Side-by-Side Synced Mode */
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {/* Left: Original with Canvas Overlay */}
+            <div className="relative rounded-xl overflow-hidden bg-black border border-navy-800 shadow-xl aspect-video flex items-center justify-center">
               <video
                 ref={videoRef}
-                src={primaryVideoSource}
+                src={originalVideoUrl}
                 onEnded={() => {
                   setIsPlaying(false);
                   setHasEnded(true);
@@ -1541,331 +1435,136 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
                 className="w-full h-full object-contain"
                 playsInline
               />
-
-              {/* Client-Side Canvas Skeleton Overlay */}
               <canvas
                 ref={overlayCanvasRef}
                 className="absolute inset-0 w-full h-full pointer-events-none z-[4]"
               />
-
-              {/* In-Video Live Replay Overlay ONLY when video reaches true end */}
-              {hasEnded && (
-                <div className="absolute inset-0 bg-navy-950/80 backdrop-blur-sm flex flex-col items-center justify-center space-y-3 z-10 animate-in fade-in duration-200">
-                  <button
-                    onClick={handleReplay}
-                    className="flex items-center space-x-2 px-6 py-3 rounded-xl bg-brand-500 hover:bg-brand-400 text-navy-950 font-black text-sm shadow-2xl shadow-brand-500/30 transform hover:scale-105 active:scale-95 transition-all cursor-pointer"
-                  >
-                    <RotateCcw className="w-5 h-5 stroke-[2.5]" />
-                    <span>Replay Practice Stroke</span>
-                  </button>
-                  <p className="text-xs text-slate-300 font-mono">Press Space or 'R' to replay</p>
-                </div>
-              )}
-
-              {/* In-Video Live HUD Overlay */}
-              {!originalOnly && (
-                <div className="absolute top-3 left-3 bg-navy-950/85 backdrop-blur-md border border-navy-800 px-3 py-2 rounded-xl text-xs font-mono space-y-0.5 shadow-lg pointer-events-none z-[5]">
-                  <div className="text-brand-400 font-bold flex items-center space-x-1.5">
-                    <span className="w-2 h-2 rounded-full bg-brand-400 animate-pulse" />
-                    <span>Phase: {currentPhase}</span>
-                  </div>
-                  <div className="text-slate-300 text-[11px]">
-                    Knee: <strong className="text-white">{currentMetric.lead_knee_angle ?? '--'}°</strong> | Elbow: <strong className="text-white">{currentMetric.lead_elbow_angle ?? '--'}°</strong> | Lean: <strong className="text-white">{currentMetric.torso_inclination ?? '--'}°</strong>
-                  </div>
-                  {currentMetric.bat_detected && currentMetric.bat_angle_deg !== null && (
-                    <div className="text-amber-400 text-[10px] flex items-center space-x-1">
-                      <span>Bat: <strong>{currentMetric.bat_angle_deg}°</strong></span>
-                      {currentMetric.bat_speed_norm && (
-                        <span>• Speed: <strong>{Number(currentMetric.bat_speed_norm).toFixed(1)}</strong></span>
-                      )}
-                      {currentMetric.ball_detected && <span className="text-rose-400">• Ball in frame</span>}
-                    </div>
-                  )}
-                </div>
-              )}
-            </div>
-          ) : (
-            /* Side-by-Side Synced Mode */
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* Left: Original with Canvas Overlay */}
-              <div className="relative rounded-xl overflow-hidden bg-black border border-navy-800 shadow-xl aspect-video flex items-center justify-center">
-                <video
-                  ref={videoRef}
-                  src={originalVideoUrl}
-                  onEnded={() => {
-                    setIsPlaying(false);
-                    setHasEnded(true);
-                  }}
-                  onPlay={() => {
-                    setIsPlaying(true);
-                    setHasEnded(false);
-                  }}
-                  onPause={() => setIsPlaying(false)}
-                  className="w-full h-full object-contain"
-                  playsInline
-                />
-                <canvas
-                  ref={overlayCanvasRef}
-                  className="absolute inset-0 w-full h-full pointer-events-none z-[4]"
-                />
-                <div className="absolute top-2 left-2 bg-navy-950/80 px-2 py-0.5 rounded text-[10px] font-mono text-brand-400 border border-navy-800 pointer-events-none z-[5]">
-                  Original Video + Canvas Overlay
-                </div>
+              <div className="absolute top-2 left-2 bg-navy-950/80 px-2 py-0.5 rounded text-[10px] font-mono text-brand-400 border border-navy-800 pointer-events-none z-[5]">
+                Original Video + Canvas Overlay
               </div>
+            </div>
 
-              {/* Right: Pre-rendered Annotated Stream */}
+            {/* Right: Pre-rendered Annotated Stream OR Reference Text Card if no clip */}
+            {annotatedVideoUrl ? (
               <div className="relative rounded-xl overflow-hidden bg-black border border-navy-800 shadow-xl aspect-video flex items-center justify-center">
                 <video
                   ref={syncedVideoRef}
-                  src={annotatedVideoUrl || originalVideoUrl}
+                  src={annotatedVideoUrl}
                   className="w-full h-full object-contain"
                   playsInline
                   muted
                 />
                 <div className="absolute top-2 left-2 bg-navy-950/80 px-2 py-0.5 rounded text-[10px] font-mono text-amber-300 border border-navy-800 pointer-events-none z-[5]">
-                  Pre-rendered Video ({analysis.total_frames} Frames)
+                  Annotated Stroke Comparison ({analysis.total_frames} Frames)
                 </div>
               </div>
-            </div>
-          )}
-
-          {/* Interactive Player Controls */}
-          <div className="bg-navy-900/90 rounded-xl border border-navy-800 p-4 space-y-3">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={() => stepFrame(-1)}
-                  className="p-2 rounded-lg bg-navy-950 hover:bg-navy-800 text-slate-300 border border-navy-800 transition-colors cursor-pointer"
-                  title="Previous Frame (Left Arrow)"
-                >
-                  <SkipBack className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={togglePlay}
-                  className="p-2.5 rounded-lg bg-brand-500 hover:bg-brand-600 text-navy-950 font-bold shadow-md transition-all cursor-pointer"
-                  title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
-                >
-                  {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-navy-950" />}
-                </button>
-                <button
-                  onClick={() => stepFrame(1)}
-                  className="p-2 rounded-lg bg-navy-950 hover:bg-navy-800 text-slate-300 border border-navy-800 transition-colors cursor-pointer"
-                  title="Next Frame (Right Arrow)"
-                >
-                  <SkipForward className="w-4 h-4" />
-                </button>
-                <button
-                  onClick={handleReplay}
-                  className="p-2 rounded-lg bg-navy-950 hover:bg-navy-800 text-slate-300 border border-navy-800 transition-colors cursor-pointer"
-                  title="Replay from Beginning (R)"
-                >
-                  <RotateCcw className="w-4 h-4" />
-                </button>
-              </div>
-
-              {/* Timestamp, Frame Counter & Source Verification Details */}
-              <div className="text-center font-mono text-xs flex flex-wrap items-center justify-center gap-2">
-                <div>
-                  <span className="text-white font-bold">{currentTimeSec.toFixed(2)}s</span>
-                  <span className="text-slate-500"> / {analysis.duration_sec.toFixed(2)}s</span>
-                  <span className="text-slate-400 ml-2">
-                    (Frame: <strong className="text-white">{currentFrame}</strong> / {analysis.analyzed_frames})
+            ) : (
+              <div className="rounded-xl overflow-hidden bg-[#181B1D] border border-[#303438] p-4 flex flex-col justify-center items-center text-center space-y-3 aspect-video">
+                <BookOpen className="w-8 h-8 text-[#7FEA35]" />
+                <div className="space-y-1 max-w-sm">
+                  <h4 className="text-xs font-bold text-white uppercase tracking-wider">
+                    Reference Guidance for {analysis.shot_type}
+                  </h4>
+                  <p className="text-[11px] text-[#A5A9AD]">
+                    No recorded reference footage available for {analysis.shot_type} — showing text guidance and technique breakdown only.
+                  </p>
+                </div>
+                {analysis.how_to_play?.bat_path && (
+                  <span className="text-[10px] font-mono text-[#7FEA35] bg-[#111315] px-2.5 py-1 rounded border border-[#303438]">
+                    Bat Path: {analysis.how_to_play.bat_path}
                   </span>
-                </div>
-                <div className="text-[11px] px-2 py-0.5 rounded bg-navy-950 border border-navy-800 text-brand-400">
-                  {analysis.fps || 30.0} FPS • Full Length ({analysis.duration_sec.toFixed(2)}s)
-                </div>
+                )}
               </div>
+            )}
+          </div>
+        )}
 
-              {/* Playback speed selector: 0.25x, 0.5x, 1.0x (default), 1.5x */}
-              <div className="flex items-center space-x-1 bg-navy-950 p-1 rounded-lg border border-navy-800 text-xs font-mono">
-                {[0.25, 0.5, 1.0, 1.5].map((speed) => (
-                  <button
-                    key={speed}
-                    onClick={() => handleSpeedChange(speed)}
-                    className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all cursor-pointer ${
-                      playbackSpeed === speed ? 'bg-navy-800 text-brand-400 font-bold' : 'text-slate-500 hover:text-slate-300'
-                    }`}
-                  >
-                    {speed}x
-                  </button>
-                ))}
+        {/* Video Player Controls */}
+        <div className="bg-[#181B1D] rounded-xl border border-[#303438] p-4 space-y-3">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={() => stepFrame(-1)}
+                className="p-2 rounded-lg bg-[#111315] hover:bg-[#25282c] text-slate-300 border border-[#303438] transition-colors cursor-pointer"
+                title="Previous Frame (Left Arrow)"
+              >
+                <SkipBack className="w-4 h-4" />
+              </button>
+              <button
+                onClick={togglePlay}
+                className="p-2.5 rounded-lg bg-[#7FEA35] hover:bg-[#94EE58] text-[#050505] font-bold shadow-md transition-all cursor-pointer"
+                title={isPlaying ? 'Pause (Space)' : 'Play (Space)'}
+              >
+                {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-black" />}
+              </button>
+              <button
+                onClick={() => stepFrame(1)}
+                className="p-2 rounded-lg bg-[#111315] hover:bg-[#25282c] text-slate-300 border border-[#303438] transition-colors cursor-pointer"
+                title="Next Frame (Right Arrow)"
+              >
+                <SkipForward className="w-4 h-4" />
+              </button>
+              <button
+                onClick={handleReplay}
+                className="p-2 rounded-lg bg-[#111315] hover:bg-[#25282c] text-slate-300 border border-[#303438] transition-colors cursor-pointer"
+                title="Replay from Beginning (R)"
+              >
+                <RotateCcw className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Timestamp & Frame Counter */}
+            <div className="text-center font-mono text-xs flex flex-wrap items-center justify-center gap-2">
+              <div>
+                <span className="text-white font-bold">{currentTimeSec.toFixed(2)}s</span>
+                <span className="text-slate-500"> / {analysis.duration_sec.toFixed(2)}s</span>
+                <span className="text-slate-400 ml-2">
+                  (Frame: <strong className="text-white">{currentFrame}</strong> / {analysis.analyzed_frames})
+                </span>
+              </div>
+              <div className="text-[11px] px-2 py-0.5 rounded bg-[#111315] border border-[#303438] text-[#7FEA35]">
+                {analysis.fps || 30.0} FPS • Full Length ({analysis.duration_sec.toFixed(2)}s)
               </div>
             </div>
 
-            {/* Frame Scrubber Slider across full video duration */}
-            <input
-              type="range"
-              min={0}
-              max={Math.max(1, analysis.analyzed_frames - 1)}
-              value={currentFrame}
-              onChange={(e) => handleSeekFrame(Number(e.target.value))}
-              className="w-full h-1.5 bg-navy-950 rounded-lg appearance-none cursor-pointer accent-brand-500"
-            />
+            {/* Playback speed selector */}
+            <div className="flex items-center space-x-1 bg-[#111315] p-1 rounded-lg border border-[#303438] text-xs font-mono">
+              {[0.25, 0.5, 1.0, 1.5].map((speed) => (
+                <button
+                  key={speed}
+                  onClick={() => handleSpeedChange(speed)}
+                  className={`px-2 py-0.5 rounded text-[11px] font-medium transition-all cursor-pointer ${
+                    playbackSpeed === speed ? 'bg-[#181B1D] text-[#7FEA35] font-bold' : 'text-slate-500 hover:text-slate-300'
+                  }`}
+                >
+                  {speed}x
+                </button>
+              ))}
+            </div>
           </div>
 
-          {/* Phase Timeline synchronized with video cursor */}
-          <PhaseTimeline
-            phases={analysis.phases}
-            currentFrame={currentFrame}
-            totalFrames={analysis.analyzed_frames}
-            onSelectFrame={handleSeekFrame}
+          {/* Frame Scrubber Slider */}
+          <input
+            type="range"
+            min={0}
+            max={Math.max(1, analysis.analyzed_frames - 1)}
+            value={currentFrame}
+            onChange={(e) => handleSeekFrame(Number(e.target.value))}
+            className="w-full h-1.5 bg-[#111315] rounded-lg appearance-none cursor-pointer accent-[#7FEA35]"
           />
         </div>
 
-        {/* Right Column: Key Biomechanical Summary & Active Frame Stats */}
-        <div className="space-y-4">
-          <div className="bg-navy-900/80 rounded-xl border border-navy-800 p-4 space-y-3">
-            <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center justify-between">
-              <span>Impact Kinematic Snapshot</span>
-              <span className="text-[10px] font-mono text-brand-400">MCC Standard</span>
-            </h3>
-
-            <div className="grid grid-cols-2 gap-3">
-              <MetricCard
-                title="Lead Knee Flexion"
-                value={analysis.summary.lead_knee_flexion_at_impact}
-                unit="°"
-                benchmark="115°–135°"
-                status={
-                  analysis.summary.lead_knee_flexion_at_impact &&
-                  analysis.summary.lead_knee_flexion_at_impact >= 115 &&
-                  analysis.summary.lead_knee_flexion_at_impact <= 135
-                    ? 'optimal'
-                    : 'warning'
-                }
-                description="Interior angle of front leg at estimated bat contact window."
-              />
-
-              <MetricCard
-                title="Lead Elbow Flexion"
-                value={analysis.summary.lead_elbow_flexion_at_impact}
-                unit="°"
-                benchmark="135°–160°"
-                status={
-                  analysis.summary.lead_elbow_flexion_at_impact &&
-                  analysis.summary.lead_elbow_flexion_at_impact < 125
-                    ? 'warning'
-                    : 'optimal'
-                }
-                description="Shoulder-elbow-wrist interior angle at impact."
-              />
-
-              <MetricCard
-                title="Lead Arm Extension"
-                value={
-                  analysis.summary.lead_arm_extension_at_impact
-                    ? Number((analysis.summary.lead_arm_extension_at_impact * 100).toFixed(0))
-                    : null
-                }
-                unit="%"
-                benchmark="85%–95%"
-                status="optimal"
-                description="Straight-line arm extension into the shot."
-              />
-
-              <MetricCard
-                title="Torso Forward Lean"
-                value={analysis.summary.torso_lean_at_impact}
-                unit="°"
-                benchmark="20°–32°"
-                status="optimal"
-                description="Spine inclination from vertical image axis at contact."
-              />
-
-              <MetricCard
-                title="Head Stability"
-                value={analysis.summary.head_stability_index}
-                unit="index"
-                benchmark="< 0.08"
-                status="optimal"
-                description="Standard deviation of normalized head displacement across execution."
-              />
-
-              <MetricCard
-                title="Max Stance Width"
-                value={analysis.summary.stance_width_ratio_max}
-                unit="x torso"
-                benchmark="1.3x–1.7x"
-                status="info"
-                description="Inter-ankle distance divided by torso height."
-              />
-            </div>
-          </div>
-
-          {/* Current Frame Instantaneous Readout */}
-          <div className="bg-navy-900/80 rounded-xl border border-navy-800 p-4 space-y-2.5">
-            <div className="flex items-center justify-between">
-              <h4 className="text-xs font-semibold uppercase tracking-wider text-slate-300">
-                Frame {currentFrame} Instantaneous Pose
-              </h4>
-              <span className="text-[10px] font-mono text-cricket-sky">
-                Conf: {(currentMetric.confidence * 100).toFixed(0)}%
-              </span>
-            </div>
-
-            <div className="space-y-1.5 text-xs font-mono">
-              <div className="flex items-center justify-between p-2 rounded bg-navy-950 border border-navy-800/80">
-                <span className="text-slate-400">Current Phase:</span>
-                <span className="text-brand-400 font-semibold">{currentPhase}</span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded bg-navy-950 border border-navy-800/80">
-                <span className="text-slate-400">Lead Knee / Elbow:</span>
-                <span className="text-white font-semibold">
-                  {currentMetric.lead_knee_angle ?? '--'}° / {currentMetric.lead_elbow_angle ?? '--'}°
-                </span>
-              </div>
-              <div className="flex items-center justify-between p-2 rounded bg-navy-950 border border-navy-800/80">
-                <span className="text-slate-400">Torso Inclination:</span>
-                <span className="text-white font-semibold">{currentMetric.torso_inclination ?? '--'}°</span>
-              </div>
-              {currentMetric.bat_detected && currentMetric.bat_angle_deg !== null && (
-                <div className="flex items-center justify-between p-2 rounded bg-navy-950 border border-navy-800/80">
-                  <span className="text-amber-400">Bat Angle / Speed:</span>
-                  <span className="text-amber-300 font-semibold">
-                    {currentMetric.bat_angle_deg}° {currentMetric.bat_speed_norm ? `(${Number(currentMetric.bat_speed_norm).toFixed(1)})` : ''}
-                  </span>
-                </div>
-              )}
-            </div>
-          </div>
-
-          {/* Model Pipeline Metadata Card */}
-          <div className="bg-navy-900/80 rounded-xl border border-navy-800 p-4 space-y-2 text-xs">
-            <h4 className="font-semibold text-slate-300 flex items-center space-x-1.5">
-              <Sparkles className="w-3.5 h-3.5 text-brand-400" />
-              <span>Inference Pipeline</span>
-            </h4>
-            <div className="text-[11px] text-slate-400 space-y-1 font-mono">
-              <div>Pose: {analysis.model_metadata.pose_estimator}</div>
-              <div>Phase Model: {analysis.model_metadata.phase_classifier}</div>
-              <div>Sampling: 1 in {analysis.sample_rate} frame(s)</div>
-              <div>Tracking Success: {analysis.model_metadata.tracking_rate}</div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Bottom Section: Explainable Coaching Feedback */}
-      <div className="pt-4">
-        <CoachingFeedbackList
-          observations={analysis.coaching_feedback}
-          shotType={analysis.shot_type}
-          plainSummary={analysis.plain_summary}
-          issueCards={analysis.issue_cards}
-          coachingPaused={analysis.coaching_paused}
-          pauseReason={analysis.pause_reason}
-          onSelectCandidateShot={handleConfirmShot}
-          topCandidates={candidatePills}
-          onSeekToFrame={handleSeekFrame}
-          onLanguageChange={handleLanguageChange}
-          currentLang={currentLang}
-          techniqueScore={analysis.overall_technique_score}
+        {/* Phase Timeline synchronized with video cursor */}
+        <PhaseTimeline
+          phases={analysis.phases}
+          currentFrame={currentFrame}
+          totalFrames={analysis.analyzed_frames}
+          onSelectFrame={handleSeekFrame}
         />
       </div>
 
       {/* Limitations Disclaimer */}
-      <div className="bg-navy-950 border border-navy-800/80 rounded-xl p-4 text-xs text-slate-500 space-y-2">
+      <div className="bg-[#111315] border border-[#303438] rounded-xl p-4 text-xs text-slate-500 space-y-2">
         <div className="flex items-center space-x-2 text-slate-400 font-semibold">
           <ShieldAlert className="w-4 h-4 text-amber-500" />
           <span>Biomechanical & Ethical Limitations</span>

@@ -56,6 +56,7 @@ def health_check():
     return {
         "status": status,
         "ready": ready,
+        "is_analyzing": job_running,
         "job_running": job_running,
         "models": {
             "pose": {"loaded": pose_loaded, "loading": pose_loading, "error": pose_error},

@@ -26,7 +26,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
 }) => {
   const [selectedFile, setSelectedFile] = useState<File | null>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-  const [shotType, setShotType] = useState<string>(initialShotType || 'Auto-Detect');
+  const [shotType, setShotType] = useState<string>(initialShotType || 'Cover Drive');
   const [handedness, setHandedness] = useState<string>('Right');
   const [cameraAngle, setCameraAngle] = useState<string>('Side View');
   const [availableShots, setAvailableShots] = useState<CricketShot[]>([]);
@@ -206,6 +206,10 @@ export const UploadPage: React.FC<UploadPageProps> = ({
     e.preventDefault();
     if (!selectedFile) {
       setError('Please select a cricket video file to upload.');
+      return;
+    }
+    if (!shotType || shotType === 'Auto-Detect') {
+      setError('Please select the batting shot you played (required for technique coaching).');
       return;
     }
 
@@ -618,11 +622,14 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                     value={shotType}
                     onChange={(e) => setShotType(e.target.value)}
                     disabled={uploading}
+                    required
                     className="w-full bg-navy-950 border border-navy-800 rounded-lg px-3 py-2 text-xs text-white focus:outline-none focus:border-brand-500 font-sans"
                   >
-                    <option value="Auto-Detect" className="bg-[#111315] text-[#7FEA35] font-bold">
-                      ✨ Auto-Detect via AI Kinematics
-                    </option>
+                    {!shotType && (
+                      <option value="" disabled>
+                        Select the shot you played (Required)
+                      </option>
+                    )}
                     {availableShots.length > 0 ? (
                       Array.from(new Set(availableShots.map((s) => s.category))).map((cat) => (
                         <optgroup key={cat} label={cat} className="bg-navy-900 text-brand-400 font-bold">
@@ -647,7 +654,7 @@ export const UploadPage: React.FC<UploadPageProps> = ({
                     )}
                   </select>
                   <p className="text-[10px] text-slate-400">
-                    CricketIQ verifies pose kinematics and allows confirming or overriding the detected shot.
+                    Technique coaching compares your swing against this shot's reference. Shot check runs in parallel as a verification.
                   </p>
                 </div>
 

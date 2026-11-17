@@ -146,6 +146,8 @@ class AnalysisResult(BaseModel):
     detected_camera_view: Optional[str] = None
     camera_view_warning: Optional[str] = None
     shot_mismatch_warning: Optional[str] = None
+    shot_check_status: Optional[str] = None
+    shot_check_message: Optional[str] = None
     striker_track_id: Optional[int] = None
     striker_score: Optional[float] = None
     striker_selection_score: Optional[float] = None

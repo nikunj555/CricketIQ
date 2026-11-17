@@ -14,13 +14,18 @@ from backend.app.services.confidence_service import confidence_service
 from backend.app.services.reference_service import reference_service
 
 
-def _make_landmarks(torso_top=0.28, torso_bot=0.55):
+def _make_landmarks(torso_top=0.28, torso_bot=0.52, knee_y=0.72, ankle_y=0.90):
+    """Generates anatomically plausible landmarks where knees and ankles are positioned below hips."""
     lms = []
     for i in range(33):
         if i in (11, 12):
             lms.append({"x": 0.35, "y": torso_top, "visibility": 0.95})
         elif i in (23, 24):
             lms.append({"x": 0.35, "y": torso_bot, "visibility": 0.95})
+        elif i in (25, 26):
+            lms.append({"x": 0.35, "y": knee_y, "visibility": 0.95})
+        elif i in (27, 28):
+            lms.append({"x": 0.35, "y": ankle_y, "visibility": 0.95})
         else:
             lms.append({"x": 0.35, "y": 0.40, "visibility": 0.90})
     return lms

@@ -13,15 +13,16 @@ class EvaluationResult(tuple):
     Unpacks as (overall_score, top_mistakes, all_observations) for backward compatibility,
     while exposing plain_summary and issue_cards.
     """
-    def __new__(cls, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None):
+    def __new__(cls, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None, phase_scores: Optional[Dict[str, float]] = None):
         return super().__new__(cls, (overall_score, top_mistakes, all_observations))
 
-    def __init__(self, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None):
+    def __init__(self, overall_score: float, top_mistakes: List[CoachingObservation], all_observations: List[CoachingObservation], plain_summary: Optional[Dict[str, Any]] = None, issue_cards: Optional[List[Dict[str, Any]]] = None, phase_scores: Optional[Dict[str, float]] = None):
         self.overall_score = overall_score
         self.top_mistakes = top_mistakes
         self.all_observations = all_observations
         self.plain_summary = plain_summary or {}
         self.issue_cards = issue_cards or []
+        self.phase_scores = phase_scores or {}
 
 # Phase importance weights for overall technique scoring
 PHASE_WEIGHTS = {
@@ -199,6 +200,8 @@ class FeedbackService:
             ("follow_through", ["lead_knee_angle", "torso_lean"])
         ]
 
+        phase_penalties = {p: 0.0 for p, _ in eval_plan}
+
         for phase_name, metric_keys in eval_plan:
             frame = phase_frames.get(phase_name)
             if not frame:
@@ -276,6 +279,7 @@ class FeedbackService:
                 # Moderate error adds ~8-12 penalty; severe error adds ~18-26 penalty
                 penalty = min(36.0, normalized_dev * 30.0 * phase_weight * metric_weight)
                 total_penalty += penalty
+                phase_penalties[phase_name] = phase_penalties.get(phase_name, 0.0) + min(35.0, normalized_dev * 25.0 * metric_weight)
 
                 # Generate plain-language coaching statement, biomechanics explanation, and drill
                 statement, why_it_matters, drill = cls._compose_coaching_narrative(
@@ -407,8 +411,15 @@ class FeedbackService:
             lang=lang
         )
 
+        phase_scores = {
+            p: max(40.0, min(100.0, round(100.0 - phase_penalties.get(p, 0.0), 1)))
+            for p, _ in eval_plan
+        }
+        if summary is not None:
+            summary["phase_scores"] = phase_scores
+
         all_observations = top_mistakes + strength_observations
-        return EvaluationResult(overall_score, top_mistakes, all_observations, plain_summary=plain_summary, issue_cards=issue_cards)
+        return EvaluationResult(overall_score, top_mistakes, all_observations, plain_summary=plain_summary, issue_cards=issue_cards, phase_scores=phase_scores)
 
     @classmethod
     def generate_coaching_feedback(
@@ -512,7 +523,7 @@ class FeedbackService:
                 if validity == "UNAVAILABLE" or measured_val is None:
                     verdict = "Unavailable" if validity == "UNAVAILABLE" else "Not Tracked"
                     status = "unavailable"
-                    yours_formatted = "N/A"
+                    yours_formatted = "not measurable from this angle" if validity == "UNAVAILABLE" else "N/A"
                 elif measured_val < min_ideal:
                     verdict = "Too Low"
                     status = "low"
@@ -539,7 +550,9 @@ class FeedbackService:
                     "unit": unit_str,
                     "verdict": verdict,
                     "status": status,
-                    "validity": validity
+                    "validity": validity,
+                    "timestamp_sec": round(float(frame.get("timestamp_sec")), 2) if frame and frame.get("timestamp_sec") is not None else None,
+                    "frame_index": frame.get("frame_index") if frame else None,
                 })
 
         return table_rows

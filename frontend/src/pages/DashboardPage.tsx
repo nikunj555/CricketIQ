@@ -19,7 +19,6 @@ import {
 import { SessionListItem, SessionListResponse, NavTab } from '../types/cricket';
 import { api } from '../services/api';
 import { BrandLogo } from '../components/BrandLogo';
-import { Batter3DCanvas } from '../components/3d/Batter3DCanvas';
 
 interface DashboardPageProps {
   onSelectTab: (tab: NavTab) => void;
@@ -254,27 +253,33 @@ export const DashboardPage: React.FC<DashboardPageProps> = ({
 
         {/* Dynamic Interactive Stage Content */}
         <div className="grid grid-cols-1 lg:grid-cols-12 gap-6 items-center">
-          <div className="lg:col-span-7">
-            <Batter3DCanvas
-              shotName="Cover Drive"
-              initialPhase={
-                activeStoryStage === 1
-                  ? 'stance'
-                  : activeStoryStage === 2
-                  ? 'downswing'
-                  : activeStoryStage === 3
-                  ? 'impact'
-                  : 'follow_through'
-              }
-              isGhost={activeStoryStage === 3}
-              ghostColor="#00f0ff"
-              highlightJoint={activeStoryStage === 4 ? 'frontKnee' : null}
-              height={360}
-              showControls={false}
-              showPhaseScrubber={activeStoryStage === 2}
-              showCameraPresets={true}
-              autoOrbitDefault={activeStoryStage === 1}
-            />
+          <div className="lg:col-span-7 bg-[#111315] border border-[#303438] rounded-2xl p-6 space-y-4">
+            <div className="flex items-center justify-between pb-3 border-b border-[#303438]">
+              <span className="text-xs font-mono font-bold text-[#7FEA35] uppercase tracking-wider">
+                Batting Technique Reference
+              </span>
+              <span className="text-[10px] font-mono text-[#A5A9AD] bg-[#181B1D] px-2 py-0.5 rounded border border-[#303438]">
+                Cover Drive · 7 Phases
+              </span>
+            </div>
+            <div className="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+              {[
+                { phase: 'Stance', desc: 'Balanced base, head still', key: 'Feet shoulder-width' },
+                { phase: 'Backlift', desc: 'Pendulum straight', key: 'High lead wrist' },
+                { phase: 'Stride', desc: 'Front foot to ball line', key: 'Head over front knee' },
+                { phase: 'Impact', desc: 'Under eye-line', key: 'Front knee ~125°' },
+              ].map((p, i) => (
+                <div key={i} className="bg-[#181B1D] border border-[#303438] rounded-xl p-3 space-y-1">
+                  <div className="text-[10px] font-mono text-[#7FEA35] font-bold">0{i + 1} · {p.phase}</div>
+                  <div className="text-white font-medium text-xs">{p.desc}</div>
+                  <div className="text-[10px] text-[#A5A9AD]">{p.key}</div>
+                </div>
+              ))}
+            </div>
+            <div className="p-3 bg-[#181B1D]/80 rounded-xl border border-[#303438] text-xs text-[#A5A9AD]">
+              <strong className="text-white">Coaching Principle: </strong>
+              Select your shot, upload your video, and get evaluated against textbook reference tolerances.
+            </div>
           </div>
 
           <div className="lg:col-span-5 space-y-4">

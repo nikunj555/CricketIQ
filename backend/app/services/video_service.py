@@ -22,6 +22,7 @@ from backend.app.services.feedback_service import feedback_service
 from backend.app.services.hand_service import hand_service
 from backend.app.services.bat_ball_service import bat_ball_service
 from backend.app.services.shot_classifier_service import shot_classifier_service
+from backend.app.services.reference_service import reference_service
 from backend.app.repositories.session_repository import session_repo
 
 logger = logging.getLogger(__name__)
@@ -56,6 +57,9 @@ def build_shot_mismatch_notice(
     if predicted.lower() in _UNKNOWN_SHOT_LABELS or "sweep" in predicted.lower():
         return None
     if predicted.lower() == (selected_shot or "").strip().lower():
+        return None
+    # Never predict shots that lack enough labelled empirical clips
+    if reference_service.get_shot_support_tier(predicted) != "supported":
         return None
     return (
         f"This looks more like a {predicted} ({int(round(confidence * 100))}% sure), but shot recognition can be wrong. "
@@ -617,8 +621,9 @@ class VideoService:
                         striker_selection_reason = f"Roboflow RF-DETR Striker Lock (Track #{rf_tid}, score {striker_selection_score})"
                     elif rf_select_status == "striker_unclear":
                         detector_status = "striker_unclear"
-                        needs_confirmation = True
-                        confirmation_message = rf_details.get("reason", "Could not tell who the striker is. Please select the batter in the preview frame.")
+                        needs_confirmation = False
+                        striker_select_method = "auto-selected (low confidence)"
+                        confirmation_message = rf_details.get("reason", "Could not tell who the striker is. Best candidate auto-selected (low confidence).")
                         active_striker_id = best_tid
                     else:
                         detector_status = "degraded: detector unavailable"
@@ -632,6 +637,10 @@ class VideoService:
                 detector_status = "degraded: detector unavailable" if not detector_service.is_configured() else "unconfigured"
                 detector_message = "Detector not configured in environment"
                 active_striker_id = best_tid
+
+            if needs_confirmation and active_striker_id is not None:
+                needs_confirmation = False
+                striker_select_method = "auto-selected (low confidence)"
 
             striker_meta = track_classifications.get(active_striker_id, {})
             striker_evidence = striker_meta.get("evidence", {})
@@ -948,15 +957,33 @@ class VideoService:
                 active_shot = shot_type
 
             # Headline discrepancy notice if detected shot differs from selected shot
+            conf_code = (
+                (classification_result.get("shot_confidence") or {}).get("level_code")
+                or classification_result.get("confidence_level_code")
+            )
             shot_mismatch_warning = build_shot_mismatch_notice(
                 selected_shot=shot_type,
                 predicted_shot=predicted_shot,
                 confidence=prediction_conf,
-                conf_code=(classification_result.get("shot_confidence") or {}).get("level_code")
-                or classification_result.get("confidence_level_code"),
+                conf_code=conf_code,
                 is_uncertain=is_uncertain,
                 auto_detect=auto_detect_requested,
             )
+
+            # Parallel shot check verification status
+            if shot_mismatch_warning:
+                shot_check_status = "mismatch"
+                shot_check_message = shot_mismatch_warning
+            elif (
+                predicted_shot.strip().lower() == shot_type.strip().lower()
+                and conf_code in ("very_sure", "fairly_sure")
+                and not is_uncertain
+            ):
+                shot_check_status = "confirmed"
+                shot_check_message = "Shot confirmed"
+            else:
+                shot_check_status = "unconfirmed"
+                shot_check_message = "Could not confirm the shot type"
 
             # Identify the impact frame index
             impact_frame_idx = None
@@ -1169,16 +1196,11 @@ class VideoService:
                 summary["support_tier"] = "supported" if guidance_level == "calibrated" else "baseline"
 
                 # The user chose the shot, so an unsure classifier never blocks coaching.
-                # Coaching pauses only when the striker is unclear, or (auto-detect mode)
-                # when the shot itself could not be determined.
-                shot_unsure = conf_level_code in ["cant_tell", "not_sure"]
-                coaching_paused = (needs_confirmation and striker_track_id is None) or (auto_detect_requested and shot_unsure)
+                # Coaching pauses ONLY when the striker is unclear and needs user selection.
+                coaching_paused = bool(needs_confirmation and striker_track_id is None)
                 pause_reason = None
                 if coaching_paused:
-                    if needs_confirmation and striker_track_id is None:
-                        pause_reason = confirmation_message or "Could not tell who the striker is. Please select the batter"
-                    else:
-                        pause_reason = "Shot recognition is uncertain. Please select which shot you played so we can give you accurate technique coaching."
+                    pause_reason = confirmation_message or "Could not tell who the striker is. Please select the batter"
 
                 # Generate structured metric comparison table (all phases and metrics vs ideal)
                 comparison_table = feedback_service.generate_comparison_table(
@@ -1201,7 +1223,7 @@ class VideoService:
             elif parsed_manual_box and len(parsed_manual_box) == 4:
                 striker_box_h = int(round((parsed_manual_box[3] - parsed_manual_box[1]) * height))
             if striker_box_h < 120:
-                limitations.insert(0, f"Distant Subject: Camera too far, angle and shot results will be less reliable (batsman height is {striker_box_h}px < 120px).")
+                limitations.insert(0, f"camera too far, angle oblique: batter is about {striker_box_h} px tall; film closer")
 
             if camera_view_warning:
                 limitations.insert(0, camera_view_warning)
@@ -1246,6 +1268,8 @@ class VideoService:
                 "prediction_confidence": prediction_conf,
                 "is_uncertain": is_uncertain,
                 "shot_mismatch_warning": shot_mismatch_warning,
+                "shot_check_status": shot_check_status,
+                "shot_check_message": shot_check_message,
                 "detected_camera_view": detected_view,
                 "camera_view_warning": camera_view_warning,
                 "striker_track_id": active_striker_id,
@@ -1302,6 +1326,7 @@ class VideoService:
                 "time_series": frame_metrics,
                 "metric_comparison_table": comparison_table,
                 "overall_technique_score": overall_score,
+                "phase_scores": getattr(eval_res, "phase_scores", summary.get("phase_scores", {})),
                 "top_mistakes": [m.model_dump() if hasattr(m, "model_dump") else m for m in top_mistakes],
                 "coaching_feedback": [f.model_dump() if hasattr(f, "model_dump") else f for f in all_obs] if guidance_level != "none" else ["Preview only: analysis coming soon"],
                 "limitations": limitations,
@@ -1366,7 +1391,10 @@ class VideoService:
         )
         result["how_to_play"] = _ref.get_how_to_play(new_shot)
         result["shot_mismatch_warning"] = None
+        result["shot_check_status"] = "confirmed"
+        result["shot_check_message"] = f"Re-analysed as {new_shot}"
         result["overall_technique_score"] = overall_score
+        result["phase_scores"] = getattr(eval_res, "phase_scores", {})
         result["top_mistakes"] = [m.model_dump() for m in top_mistakes]
         result["coaching_feedback"] = [f.model_dump() for f in all_obs]
         result["metric_comparison_table"] = comparison_table

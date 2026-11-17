@@ -116,12 +116,12 @@ export const EvaluationPage: React.FC = () => {
             <h1 className="text-2xl font-extrabold text-white tracking-tight">
               Machine Learning Evaluation & Project Research
             </h1>
-            <span className="text-xs font-mono px-2 py-0.5 rounded bg-emerald-500/10 text-emerald-400 border border-emerald-500/20">
-              Empirical Benchmarks
+            <span className="text-xs font-mono px-2 py-0.5 rounded bg-amber-500/10 text-amber-400 border border-amber-500/30 font-bold">
+              Synthetic Benchmark
             </span>
           </div>
           <p className="text-xs text-slate-400 mt-0.5">
-            Experimental results from trained BiLSTM temporal sequence model versus baseline classifier on held-out test data (Synthetic Benchmark).
+            BiLSTM temporal sequence model metrics evaluated on synthetic benchmark sequences. Real shot-check accuracy is evaluated separately on labelled practice clips.
           </p>
         </div>
       </div>
@@ -131,7 +131,7 @@ export const EvaluationPage: React.FC = () => {
         <div className="bg-navy-900/80 p-5 rounded-xl border border-navy-800 space-y-1">
           <div className="flex items-center justify-between">
             <span className="text-xs font-semibold uppercase tracking-wider text-slate-400">
-              BiLSTM Test Accuracy
+              BiLSTM Accuracy (Synthetic Benchmark)
             </span>
             <span className="text-[10px] font-mono px-1.5 py-0.5 rounded bg-navy-800 text-amber-400 border border-amber-500/30">
               measured on synthetic data

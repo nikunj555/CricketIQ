@@ -122,7 +122,9 @@ export interface MetricComparisonRow {
   unit: string;
   verdict: 'OK' | 'Too Low' | 'Too High' | 'Unavailable' | 'Not Tracked' | string;
   status: 'ok' | 'low' | 'high' | 'unavailable' | string;
-  validity: 'MEASURED' | 'ESTIMATED' | 'UNAVAILABLE' | string;
+  validity: 'MEASURED' | 'ESTIMATED' | 'UNAVAILABLE' | 'MODEL_INFERRED' | string;
+  timestamp_sec?: number | null;
+  frame_index?: number | null;
 }
 
 export interface ShotConfidence {
@@ -215,6 +217,8 @@ export interface AnalysisResult {
   plain_summary?: PlainTopSummary | null;
   issue_cards?: IssueCard[];
   shot_mismatch_warning?: string | null;
+  shot_check_status?: 'confirmed' | 'unconfirmed' | 'mismatch' | string | null;
+  shot_check_message?: string | null;
   detected_camera_view?: string | null;
   camera_view_warning?: string | null;
   striker_track_id?: number | null;
@@ -264,6 +268,7 @@ export interface AnalysisResult {
   handedness: string;
   camera_angle: string;
   overall_technique_score?: number | null;
+  phase_scores?: Record<string, number> | null;
   top_mistakes?: CoachingObservation[];
   fps: number;
   duration_sec: number;
