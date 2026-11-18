@@ -164,6 +164,7 @@ class AnalysisResult(BaseModel):
     guidance_level: Optional[str] = None
     guidance_note: Optional[str] = None
     how_to_play: Optional[Dict[str, Any]] = None
+    learning_videos: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="Curated learning video lessons for the selected shot")
     coaching_paused: Optional[bool] = False
     pause_reason: Optional[str] = None
     plain_summary: Optional[Dict[str, Any]] = None

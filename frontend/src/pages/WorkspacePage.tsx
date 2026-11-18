@@ -29,6 +29,8 @@ import { api } from '../services/api';
 import { MetricCard } from '../components/MetricCard';
 import { PhaseTimeline } from '../components/PhaseTimeline';
 import { CoachingFeedbackList } from '../components/CoachingFeedbackList';
+import { LearnShotCard } from '../components/LearnShotCard';
+import { LearningVideo } from '../types/cricket';
 
 interface WorkspacePageProps {
   sessionId: string | null;
@@ -73,6 +75,7 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
   const [hasEnded, setHasEnded] = useState<boolean>(false);
   const [isSwitchingStriker, setIsSwitchingStriker] = useState<boolean>(false);
   const [dismissMismatch, setDismissMismatch] = useState<boolean>(false);
+  const [learningVideos, setLearningVideos] = useState<LearningVideo[]>([]);
 
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const syncedVideoRef = useRef<HTMLVideoElement | null>(null);
@@ -103,6 +106,18 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
     }
     loadSession(sessionId);
   }, [sessionId]);
+
+  useEffect(() => {
+    if (analysis?.learning_videos && analysis.learning_videos.length > 0) {
+      setLearningVideos(analysis.learning_videos);
+    } else if (analysis?.shot_type) {
+      api.getShotVideos(analysis.shot_type)
+        .then((vids) => setLearningVideos(vids || []))
+        .catch(() => setLearningVideos([]));
+    } else {
+      setLearningVideos([]);
+    }
+  }, [analysis?.shot_type, analysis?.learning_videos]);
 
   const loadSession = async (id: string) => {
     try {
@@ -944,6 +959,11 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
           )}
         </div>
 
+        {/* Learn this shot Link Card (replaces masterclass panel) */}
+        {learningVideos.length > 0 && (
+          <LearnShotCard videos={learningVideos} />
+        )}
+
         {analysis.how_to_play?.bat_path && (
           <div className="bg-[#181B1D] p-3 rounded-xl border border-[#303438] text-xs">
             <span className="font-bold text-[#7FEA35]">Bat Path: </span>
@@ -1461,13 +1481,19 @@ export const WorkspacePage: React.FC<WorkspacePageProps> = ({ sessionId, onSelec
             ) : (
               <div className="rounded-xl overflow-hidden bg-[#181B1D] border border-[#303438] p-4 flex flex-col justify-center items-center text-center space-y-3 aspect-video">
                 <BookOpen className="w-8 h-8 text-[#7FEA35]" />
-                <div className="space-y-1 max-w-sm">
+                <div className="space-y-2 max-w-md w-full">
                   <h4 className="text-xs font-bold text-white uppercase tracking-wider">
-                    Reference Guidance for {analysis.shot_type}
+                    Technique Guidance for {analysis.shot_type}
                   </h4>
-                  <p className="text-[11px] text-[#A5A9AD]">
-                    No recorded reference footage available for {analysis.shot_type} — showing text guidance and technique breakdown only.
-                  </p>
+                  {learningVideos.length > 0 ? (
+                    <div className="text-left w-full">
+                      <LearnShotCard videos={learningVideos} />
+                    </div>
+                  ) : (
+                    <p className="text-[11px] text-[#A5A9AD]">
+                      Showing text guidance and technique breakdown only.
+                    </p>
+                  )}
                 </div>
                 {analysis.how_to_play?.bat_path && (
                   <span className="text-[10px] font-mono text-[#7FEA35] bg-[#111315] px-2.5 py-1 rounded border border-[#303438]">

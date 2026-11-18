@@ -310,7 +310,7 @@ export const ShotLibraryPage: React.FC<ShotLibraryPageProps> = ({
                   <div
                     onClick={() => setActiveModalShot(shot)}
                     className="cursor-pointer"
-                    title="Click to preview authentic technique & 7-phase breakdown"
+                    title="Click to preview technique & 7-phase breakdown"
                   >
                     <h3 className="text-base font-bold text-[#F5F5F5] group-hover:text-[#7FEA35] transition-colors flex items-center justify-between">
                       <span>{shot.name}</span>
@@ -373,7 +373,7 @@ export const ShotLibraryPage: React.FC<ShotLibraryPageProps> = ({
                     <button
                       onClick={() => setActiveModalShot(shot)}
                       className="w-full py-2 px-2.5 rounded-lg bg-[#111315] hover:bg-[#303438] text-[#7FEA35] text-xs font-bold border border-[#303438] hover:border-[#7FEA35]/40 transition-colors cursor-pointer text-center flex items-center justify-center space-x-1"
-                      title="Inspect Authentic Video, 7 Phases & Technique Breakdown"
+                      title="Inspect 7 Phases & Technique Breakdown"
                     >
                       <Play className="w-3.5 h-3.5 fill-[#7FEA35]" />
                       <span>Preview & Technique</span>
@@ -394,7 +394,7 @@ export const ShotLibraryPage: React.FC<ShotLibraryPageProps> = ({
         </div>
       )}
 
-      {/* Authentic Shot Preview & Biomechanical Breakdown Modal */}
+      {/* Shot Preview & Biomechanical Breakdown Modal */}
       {activeModalShot && (
         <ShotPreviewModal
           shot={activeModalShot}

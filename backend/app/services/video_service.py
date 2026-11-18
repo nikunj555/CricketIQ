@@ -23,6 +23,7 @@ from backend.app.services.hand_service import hand_service
 from backend.app.services.bat_ball_service import bat_ball_service
 from backend.app.services.shot_classifier_service import shot_classifier_service
 from backend.app.services.reference_service import reference_service
+from backend.app.services.learning_video_service import learning_video_service
 from backend.app.repositories.session_repository import session_repo
 
 logger = logging.getLogger(__name__)
@@ -1308,6 +1309,7 @@ class VideoService:
                 "guidance_level": guidance_level,
                 "guidance_note": guidance_note,
                 "how_to_play": how_to_play,
+                "learning_videos": learning_video_service.get_videos_for_shot(active_shot),
                 "shot_classification": classification_result,
                 "shot_confidence": shot_conf,
                 "coaching_paused": coaching_paused,
@@ -1390,6 +1392,7 @@ class VideoService:
             f"so treat the numbers as a guide, not a precise score." if _lvl == "baseline" else None
         )
         result["how_to_play"] = _ref.get_how_to_play(new_shot)
+        result["learning_videos"] = learning_video_service.get_videos_for_shot(new_shot)
         result["shot_mismatch_warning"] = None
         result["shot_check_status"] = "confirmed"
         result["shot_check_message"] = f"Re-analysed as {new_shot}"

@@ -200,6 +200,14 @@ export interface PlainTopSummary {
   unmeasurable_notices: string[];
 }
 
+export interface LearningVideo {
+  title: string;
+  provider: string;
+  channel: string;
+  url: string;
+  match: 'exact' | 'related' | string;
+}
+
 export interface AnalysisResult {
   session_id: string;
   video_filename: string;
@@ -212,6 +220,7 @@ export interface AnalysisResult {
   guidance_level?: 'calibrated' | 'baseline' | 'none' | null;
   guidance_note?: string | null;
   how_to_play?: { shot: string; bat_path?: string | null; key_points: string[]; phase_steps: string[] } | null;
+  learning_videos?: LearningVideo[] | null;
   coaching_paused?: boolean;
   pause_reason?: string | null;
   plain_summary?: PlainTopSummary | null;

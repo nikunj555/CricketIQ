@@ -1,28 +1,21 @@
-import React, { useState, useEffect, useRef, useMemo } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import {
-  Play,
-  Pause,
-  RotateCcw,
-  Gauge,
   CheckCircle2,
   AlertTriangle,
   X,
   Upload,
   Video,
-  Award,
-  ChevronRight,
   ShieldCheck,
-  Info,
   Layers,
   Sparkles,
   Compass,
   Crosshair,
-  Dumbbell,
-  Shuffle
+  Dumbbell
 } from 'lucide-react';
-import { CricketShot, ReferenceDetail } from '../types/cricket';
+import { CricketShot, ReferenceDetail, LearningVideo } from '../types/cricket';
 import { api } from '../services/api';
 import { getShotAnimation, ShotAnimationDefinition } from '../data/shotAnimations';
+import { LearnShotCard } from './LearnShotCard';
 
 interface ShotPreviewModalProps {
   shot: CricketShot;
@@ -40,134 +33,29 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
   onUploadAttempt,
 }) => {
   const [refDetail, setRefDetail] = useState<ReferenceDetail | null>(null);
-  const [loading, setLoading] = useState<boolean>(true);
-  const [error, setError] = useState<string | null>(null);
+  const [learningVideos, setLearningVideos] = useState<LearningVideo[]>([]);
+  const [activePhaseIndex, setActivePhaseIndex] = useState<number>(0);
 
-  const [isPlaying, setIsPlaying] = useState<boolean>(true);
-  const [playbackSpeed, setPlaybackSpeed] = useState<number>(0.75);
-  const [activePhaseIndex, setActivePhaseIndex] = useState<number>(0); // Default to Stance
-  const [showUploadModal, setShowUploadModal] = useState<boolean>(false);
-  const [uploadFile, setUploadFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState<boolean>(false);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-
-  // Authoritative shot animation from shotAnimations.ts
+  // Authoritative shot animation cues
   const shotAnimation: ShotAnimationDefinition | null = useMemo(() => {
     return getShotAnimation(shot.name || shot.id);
   }, [shot.id, shot.name]);
 
   useEffect(() => {
     loadReference();
-  }, [shot.id]);
+    api.getShotVideos(shot.name || shot.id)
+      .then((vids) => setLearningVideos(vids || []))
+      .catch(() => setLearningVideos([]));
+  }, [shot.id, shot.name]);
 
   const loadReference = async () => {
     try {
-      setLoading(true);
-      setError(null);
       const data = await api.getShotReference(shot.id);
       setRefDetail(data);
-    } catch (err: any) {
-      console.warn('Reference load notice:', err.message);
-      if (shot.reference_video_url) {
-        setRefDetail({
-          id: shot.reference_id || 'ref_default',
-          shot_id: shot.id,
-          shot_name: shot.name,
-          player_name: shot.reference_player || 'National Academy Benchmark',
-          source: shot.reference_source || 'Verified Cricket Biomechanics Reference',
-          video_url: shot.reference_video_url,
-          thumbnail_url: shot.reference_thumbnail_url,
-          camera_view: 'Side View',
-          verification_status: 'verified',
-          description: shot.description,
-          stance_setup: 'Balanced standard batting stance with feet shoulder-width apart.',
-          footwork_weight_transfer: 'Controlled stride and synchronized weight transfer.',
-          body_positioning: 'Upright torso with head stationed over the ball line.',
-          technique_points: [
-            shot.technique_notes || `Maintain textbook execution for ${shot.name}.`,
-            'High front elbow guiding the vertical plane.',
-            'Lead knee flexes to absorb momentum.',
-            'Hold the finish to verify balance.'
-          ],
-          common_mistakes: shotAnimation?.commonMistakes || [
-            'Playing away from the body without full commitment to footwork',
-            'Closing or opening the bat face prematurely through impact',
-            'Collapsing the front knee or losing balance during downswing'
-          ],
-          phases: [
-            { phase_name: 'Stance', frame_window: '0% - 20%', description: 'Initial balanced ready position.', lead_knee_target: '165° - 170°', key_cue: 'Relaxed grip, soft knees' },
-            { phase_name: 'Backlift', frame_window: '20% - 35%', description: 'Backswing initiated toward slips.', lead_knee_target: '160° - 165°', key_cue: 'Top hand directs bat face' },
-            { phase_name: 'Stride', frame_window: '35% - 50%', description: 'Decisive footwork establishing base.', lead_knee_target: '135° - 150°', key_cue: 'Head leads stride' },
-            { phase_name: 'Downswing', frame_window: '50% - 65%', description: 'Bat accelerates smoothly into swing arc.', lead_knee_target: '125° - 135°', key_cue: 'Lead elbow leads path' },
-            { phase_name: 'Impact window', frame_window: '65% - 74%', description: 'Bat strikes ball under eye line.', lead_knee_target: '118° - 128°', key_cue: 'Eyes locked on contact' },
-            { phase_name: 'Follow-through', frame_window: '74% - 88%', description: 'Smooth deceleration through line.', lead_knee_target: '130° - 145°', key_cue: 'Hold pose for balance' },
-            { phase_name: 'Recovery', frame_window: '88% - 100%', description: 'Controlled reset toward neutral.', lead_knee_target: '160° - 168°', key_cue: 'Push back into stance' },
-          ],
-          key_metrics: {
-            lead_knee_flexion_at_impact: 124.0,
-            torso_lean_at_impact: 25.0,
-            head_stability_index: 0.035
-          }
-        });
-      }
-    } finally {
-      setLoading(false);
+    } catch {
+      // Keep graceful fallback for reference text
     }
   };
-
-  const togglePlay = () => {
-    if (videoRef.current) {
-      if (isPlaying) {
-        videoRef.current.pause();
-        setIsPlaying(false);
-      } else {
-        videoRef.current.play();
-        setIsPlaying(true);
-      }
-    }
-  };
-
-  const setSpeed = (spd: number) => {
-    setPlaybackSpeed(spd);
-    if (videoRef.current) {
-      videoRef.current.playbackRate = spd;
-    }
-  };
-
-  const handleRestart = () => {
-    if (videoRef.current) {
-      videoRef.current.currentTime = 0;
-      videoRef.current.play();
-      setIsPlaying(true);
-    }
-  };
-
-  const handleCustomUpload = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!uploadFile) return;
-    try {
-      setUploading(true);
-      const fd = new FormData();
-      fd.append('file', uploadFile);
-      fd.append('shot_id', shot.id);
-      fd.append('player_name', 'Custom Authorized Reference');
-      fd.append('source', 'User Uploaded Reference');
-      await api.uploadCustomReference(fd);
-      setShowUploadModal(false);
-      loadReference();
-    } catch (err: any) {
-      alert(`Upload failed: ${err.message}`);
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const videoSource = refDetail?.video_url
-    ? api.getVideoUrl(refDetail.video_url)
-    : shot.reference_video_url
-    ? api.getVideoUrl(shot.reference_video_url)
-    : null;
 
   const phases = useMemo(() => {
     return PHASE_KEYS.map((pk) => {
@@ -213,15 +101,6 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
                 <span>Intent: {shot.technique_notes}</span>
               </div>
             )}
-            {refDetail && (
-              <p className="text-xs text-[#A5A9AD] flex items-center space-x-2">
-                <span className="text-[#F5F5F5] font-semibold">{refDetail.player_name}</span>
-                <span>•</span>
-                <span className="text-[#A5A9AD]">{refDetail.source}</span>
-                <span>•</span>
-                <span className="font-mono text-[11px] text-[#7FEA35]">{refDetail.camera_view}</span>
-              </p>
-            )}
           </div>
           <button
             onClick={onClose}
@@ -251,94 +130,15 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
           </div>
         </div>
 
-        {/* Authentic Video Player Section */}
-        <div className="space-y-3">
-          <div className="flex items-center justify-between pb-1">
-            <span className="text-xs font-mono font-bold text-[#7FEA35] flex items-center space-x-1.5">
-              <Video className="w-4 h-4" />
-              <span>Authentic Masterclass Footage</span>
-            </span>
-            <span className="text-[11px] font-mono text-[#A5A9AD]">
-              Masterclass benchmark footage
-            </span>
-          </div>
+        {/* Learn this shot Link Card */}
+        {learningVideos.length > 0 && (
+          <LearnShotCard videos={learningVideos} />
+        )}
 
-          <div className="relative rounded-2xl overflow-hidden bg-[#0A0C0E] border border-[#303438] aspect-video max-h-[380px] w-full flex items-center justify-center">
-            {videoSource ? (
-              <video
-                ref={videoRef}
-                src={videoSource}
-                loop
-                autoPlay
-                muted
-                playsInline
-                className="w-full h-full object-contain"
-                onPlay={() => setIsPlaying(true)}
-                onPause={() => setIsPlaying(false)}
-              />
-            ) : (
-              <div className="text-center p-8 space-y-3">
-                <AlertTriangle className="w-10 h-10 text-amber-400 mx-auto" />
-                <h4 className="text-sm font-bold text-[#F5F5F5]">No Authentic Footage Available</h4>
-                <p className="text-xs text-[#A5A9AD] max-w-md">
-                  CricketIQ refuses to show generic substitute videos for unrelated shots. You can upload an authorized reference video below.
-                </p>
-                <button
-                  onClick={() => setShowUploadModal(true)}
-                  className="px-4 py-2 rounded-xl bg-[#7FEA35] text-black text-xs font-bold hover:bg-[#94EE58] cursor-pointer"
-                >
-                  Upload Reference Video
-                </button>
-              </div>
-            )}
-
-            {/* Video Controls Overlay */}
-            {videoSource && (
-              <div className="absolute bottom-3 left-3 right-3 bg-[#0B0D0F]/90 backdrop-blur-md px-4 py-2.5 rounded-xl border border-[#303438] flex items-center justify-between text-xs text-[#F5F5F5]">
-                <div className="flex items-center space-x-3">
-                  <button
-                    onClick={togglePlay}
-                    className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#7FEA35] transition-colors cursor-pointer"
-                    title={isPlaying ? 'Pause' : 'Play'}
-                  >
-                    {isPlaying ? <Pause className="w-4 h-4" /> : <Play className="w-4 h-4 fill-[#7FEA35]" />}
-                  </button>
-                  <button
-                    onClick={handleRestart}
-                    className="p-1.5 rounded-lg bg-[#181B1D] hover:bg-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] transition-colors cursor-pointer"
-                    title="Replay"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                  </button>
-                  <span className="text-[11px] font-mono text-[#A5A9AD]">
-                    {refDetail?.player_name || 'Master Class'}
-                  </span>
-                </div>
-
-                <div className="flex items-center space-x-2">
-                  <span className="text-[11px] text-[#A5A9AD] font-mono">Speed:</span>
-                  {[0.5, 0.75, 1.0].map((spd) => (
-                    <button
-                      key={spd}
-                      onClick={() => setSpeed(spd)}
-                      className={`px-2 py-1 rounded text-[11px] font-mono font-semibold cursor-pointer transition-all ${
-                        playbackSpeed === spd
-                          ? 'bg-[#7FEA35] text-black'
-                          : 'bg-[#181B1D] text-[#A5A9AD] hover:text-[#F5F5F5]'
-                      }`}
-                    >
-                      {spd}x
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-
-          <p className="text-xs text-[#A5A9AD] leading-relaxed">
-            {refDetail?.description || shot.description}
-          </p>
-        </div>
+        {/* Shot Overview Description */}
+        <p className="text-xs text-[#A5A9AD] leading-relaxed">
+          {refDetail?.description || shot.description}
+        </p>
 
         {/* 7-Phase Movement Breakdown Timeline */}
         <div className="space-y-3 pt-2 border-t border-[#303438]">
@@ -449,7 +249,7 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
 
         {/* Technique Points, Common Mistakes & Practice Drills */}
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-2 border-t border-[#303438]">
-          {/* Key Technique Points */}
+          {/* Key Checkpoints */}
           <div className="p-4 rounded-xl bg-[#111315] border border-[#303438] space-y-2.5">
             <h4 className="text-xs font-bold text-[#F5F5F5] uppercase tracking-wider font-mono flex items-center space-x-2">
               <CheckCircle2 className="w-4 h-4 text-[#7FEA35]" />
@@ -499,86 +299,28 @@ export const ShotPreviewModal: React.FC<ShotPreviewModalProps> = ({
         </div>
 
         {/* Modal Actions */}
-        <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-4 border-t border-[#303438]">
+        <div className="flex items-center justify-end space-x-3 pt-4 border-t border-[#303438]">
           <button
-            onClick={() => setShowUploadModal(true)}
-            className="w-full sm:w-auto px-4 py-2 rounded-xl bg-[#111315] hover:bg-[#303438] text-[#A5A9AD] hover:text-[#F5F5F5] text-xs font-semibold border border-[#303438] transition-colors cursor-pointer flex items-center justify-center space-x-1.5"
-            title="Upload an authorized coach/player video to replace or supplement this reference"
+            onClick={() => {
+              onUploadAttempt(shot);
+              onClose();
+            }}
+            className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-[#111315] hover:bg-[#303438] text-[#F5F5F5] text-xs font-bold border border-[#303438] hover:border-[#7FEA35]/40 transition-colors cursor-pointer flex items-center justify-center space-x-2"
           >
-            <Upload className="w-3.5 h-3.5" />
-            <span>Upload Custom Reference</span>
+            <Upload className="w-4 h-4" />
+            <span>Upload Video Attempt</span>
           </button>
-
-          <div className="flex items-center space-x-3 w-full sm:w-auto">
-            <button
-              onClick={() => {
-                onUploadAttempt(shot);
-                onClose();
-              }}
-              className="flex-1 sm:flex-none px-4 py-2.5 rounded-xl bg-[#111315] hover:bg-[#303438] text-[#F5F5F5] text-xs font-bold border border-[#303438] hover:border-[#7FEA35]/40 transition-colors cursor-pointer flex items-center justify-center space-x-2"
-            >
-              <Upload className="w-4 h-4" />
-              <span>Upload Video Attempt</span>
-            </button>
-            <button
-              onClick={() => {
-                onStartPractice(shot);
-                onClose();
-              }}
-              className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-[#7FEA35] hover:bg-[#94EE58] text-[#050505] text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-[#7FEA35]/20"
-            >
-              <Video className="w-4 h-4 fill-current" />
-              <span>Practice in Live Coach</span>
-            </button>
-          </div>
+          <button
+            onClick={() => {
+              onStartPractice(shot);
+              onClose();
+            }}
+            className="flex-1 sm:flex-none px-5 py-2.5 rounded-xl bg-[#7FEA35] hover:bg-[#94EE58] text-[#050505] text-xs font-extrabold transition-all cursor-pointer flex items-center justify-center space-x-2 shadow-lg shadow-[#7FEA35]/20"
+          >
+            <Video className="w-4 h-4 fill-current" />
+            <span>Practice in Live Coach</span>
+          </button>
         </div>
-
-        {/* Custom Reference Upload Sub-modal */}
-        {showUploadModal && (
-          <div className="fixed inset-0 z-60 bg-black/80 flex items-center justify-center p-4">
-            <div className="bg-[#181B1D] border border-[#303438] rounded-2xl max-w-md w-full p-6 space-y-4 shadow-2xl">
-              <div className="flex items-center justify-between pb-3 border-b border-[#303438]">
-                <h3 className="text-sm font-bold text-[#F5F5F5]">
-                  Upload Reference Video: {shot.name}
-                </h3>
-                <button
-                  onClick={() => setShowUploadModal(false)}
-                  className="text-[#A5A9AD] hover:text-[#F5F5F5]"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-              <p className="text-xs text-[#A5A9AD]">
-                Upload an authorized MP4/MOV recording demonstrating textbook execution of this stroke. It will be immediately registered in the reference database.
-              </p>
-              <form onSubmit={handleCustomUpload} className="space-y-4">
-                <input
-                  type="file"
-                  accept="video/mp4,video/quicktime,video/webm"
-                  onChange={(e) => setUploadFile(e.target.files?.[0] || null)}
-                  className="w-full text-xs text-[#A5A9AD] file:mr-3 file:py-2 file:px-3 file:rounded-lg file:border-0 file:text-xs file:font-semibold file:bg-[#7FEA35] file:text-black cursor-pointer"
-                  required
-                />
-                <div className="flex items-center justify-end space-x-2 pt-2">
-                  <button
-                    type="button"
-                    onClick={() => setShowUploadModal(false)}
-                    className="px-3 py-1.5 rounded-lg bg-[#111315] text-[#A5A9AD] text-xs"
-                  >
-                    Cancel
-                  </button>
-                  <button
-                    type="submit"
-                    disabled={uploading || !uploadFile}
-                    className="px-4 py-1.5 rounded-lg bg-[#7FEA35] text-black text-xs font-bold disabled:opacity-50"
-                  >
-                    {uploading ? 'Uploading...' : 'Save Reference'}
-                  </button>
-                </div>
-              </form>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

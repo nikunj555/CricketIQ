@@ -11,6 +11,7 @@ import {
   LiveAttemptFeedback,
   CricketShot,
   ShotListResponse,
+  LearningVideo,
 } from '../types/cricket';
 
 const isVercelHost =
@@ -300,6 +301,14 @@ export const api = {
     if (!res.ok) {
       const err = await res.json().catch(() => ({ detail: 'Shot not found' }));
       throw new Error(err.detail || 'Failed to fetch shot details');
+    }
+    return res.json();
+  },
+
+  async getShotVideos(idOrSlug: string): Promise<LearningVideo[]> {
+    const res = await apiFetch(`${API_BASE}/shots/${encodeURIComponent(idOrSlug)}/videos`);
+    if (!res.ok) {
+      return [];
     }
     return res.json();
   },

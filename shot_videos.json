@@ -1,0 +1,174 @@
+{
+  "_note": "Links to Sikana lesson pages (sikana.tv). Sikana hosts its own videos; link out, do not embed or hotlink their files. match=related means a similar/base technique, not the exact shot. Empty list = no lesson found.",
+  "videos": {
+    "Cover Drive": [
+      {
+        "title": "How to Play a Cover Drive",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/cover-drive",
+        "match": "exact"
+      }
+    ],
+    "Straight Drive": [
+      {
+        "title": "How to Play a Straight Drive",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/straight-drive",
+        "match": "exact"
+      }
+    ],
+    "On Drive": [
+      {
+        "title": "How to Play an On Drive",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/on-drive",
+        "match": "exact"
+      }
+    ],
+    "Off Drive": [
+      {
+        "title": "How to Play an Off Drive",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/off-drive",
+        "match": "exact"
+      }
+    ],
+    "Lofted Drive": [
+      {
+        "title": "How to Play a Lofted Drive",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/lofted-drive",
+        "match": "exact"
+      }
+    ],
+    "Forward Defensive": [
+      {
+        "title": "How to Play a Front Foot Defence",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/front-foot-defence",
+        "match": "exact"
+      }
+    ],
+    "Back-foot Defensive": [
+      {
+        "title": "How to Play a Back Foot Defence",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/back-foot-defence",
+        "match": "exact"
+      }
+    ],
+    "Back-foot Punch": [
+      {
+        "title": "How to Play a Back Foot Punch",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/backfoot-punch",
+        "match": "exact"
+      }
+    ],
+    "Square Cut": [
+      {
+        "title": "How to Play a Square Cut",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/square-cut",
+        "match": "exact"
+      }
+    ],
+    "Late Cut": [
+      {
+        "title": "How to Play a Late Cut",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/late-cut",
+        "match": "exact"
+      }
+    ],
+    "Upper Cut": [],
+    "Pull Shot": [
+      {
+        "title": "How to Play a Pull Shot",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/pull-shot",
+        "match": "exact"
+      }
+    ],
+    "Hook Shot": [],
+    "Flick Shot": [
+      {
+        "title": "How to Play a Flick Shot",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/flick-shot",
+        "match": "exact"
+      }
+    ],
+    "Leg Glance": [
+      {
+        "title": "How to Play a Leg Glance",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/leg-glance",
+        "match": "exact"
+      }
+    ],
+    "Clip Shot": [
+      {
+        "title": "How to Play a Flick Shot (similar leg-side shot)",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/flick-shot",
+        "match": "related"
+      }
+    ],
+    "Sweep": [
+      {
+        "title": "How to Play a Sweep Shot",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/sweep-shot",
+        "match": "exact"
+      }
+    ],
+    "Slog Sweep": [
+      {
+        "title": "How to Play a Sweep Shot (base technique)",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/sweep-shot",
+        "match": "related"
+      }
+    ],
+    "Reverse Sweep": [
+      {
+        "title": "How to Play a Reverse Sweep",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/reverse-sweep",
+        "match": "exact"
+      }
+    ],
+    "Paddle Sweep": [
+      {
+        "title": "How to Play a Sweep Shot (base technique)",
+        "provider": "Sikana",
+        "channel": "Sikana Education",
+        "url": "https://www.sikana.tv/en/sport/cricket/sweep-shot",
+        "match": "related"
+      }
+    ],
+    "Slog": [],
+    "Switch Hit": [],
+    "Scoop Shot": [],
+    "Ramp Shot": [],
+    "Helicopter Shot": []
+  }
+}

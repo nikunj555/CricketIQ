@@ -1,5 +1,5 @@
 from fastapi import APIRouter, HTTPException, Query
-from typing import Optional, List
+from typing import Optional, List, Dict, Any
 from backend.app.schemas.shots import ShotListResponse, CricketShot, CategorySummary
 from backend.app.data.shot_catalogue import (
     SHOT_CATALOGUE,
@@ -7,6 +7,7 @@ from backend.app.data.shot_catalogue import (
     get_shot_by_id_or_slug
 )
 from backend.app.services.reference_service import reference_service
+from backend.app.services.learning_video_service import learning_video_service
 
 router = APIRouter(prefix="/shots", tags=["Shot Library"])
 
@@ -73,3 +74,10 @@ def get_shot(id_or_slug: str):
     if not shot:
         raise HTTPException(status_code=404, detail=f"Cricket shot '{id_or_slug}' not found in catalogue.")
     return CricketShot(**_enrich_shot_data(shot))
+
+@router.get("/{id_or_slug}/videos", response_model=List[Dict[str, Any]])
+def get_shot_videos(id_or_slug: str):
+    shot = get_shot_by_id_or_slug(id_or_slug)
+    if not shot:
+        raise HTTPException(status_code=404, detail=f"Cricket shot '{id_or_slug}' not found in catalogue.")
+    return learning_video_service.get_videos_for_shot(shot["name"])
