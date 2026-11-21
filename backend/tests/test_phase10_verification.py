@@ -169,6 +169,9 @@ def test_d_shot_classification_and_manual_confirmation():
 
     # Test confirmation endpoint on a session
     sessions = session_repo.list_sessions(limit=1)
+    if not sessions:
+        session_repo.create_session("test_p10_confirm_sess", video_filename="user_cover_drive.mp4", shot_type="Cover Drive")
+        sessions = session_repo.list_sessions(limit=1)
     if sessions:
         target_id = sessions[0]["session_id"]
         res = client.post(f"/api/sessions/{target_id}/confirm-shot", json={

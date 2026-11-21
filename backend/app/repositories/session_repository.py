@@ -11,7 +11,21 @@ logger = logging.getLogger(__name__)
 
 class SessionRepository:
     def __init__(self, db_path: Optional[Path] = None):
-        self.db_path = str(db_path or settings.DB_PATH)
+        self._custom_db_path = str(db_path) if db_path else None
+        self._init_db()
+
+    @property
+    def db_path(self) -> str:
+        if self._custom_db_path:
+            return self._custom_db_path
+        return str(settings.DB_PATH)
+
+    @db_path.setter
+    def db_path(self, value: str):
+        self._custom_db_path = str(value)
+
+    def set_db_path(self, new_db_path: Path | str):
+        self._custom_db_path = str(new_db_path)
         self._init_db()
 
     def _get_connection(self) -> sqlite3.Connection:

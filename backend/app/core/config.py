@@ -32,7 +32,17 @@ class Settings:
     UPLOADS_DIR: Path = STORAGE_DIR / "uploads"
     ANNOTATED_DIR: Path = STORAGE_DIR / "annotated"
     THUMBNAILS_DIR: Path = STORAGE_DIR / "thumbnails"
-    DB_PATH: Path = STORAGE_DIR / "cricketiq.db"
+
+    @property
+    def DB_PATH(self) -> Path:
+        custom = os.getenv("DATABASE_URL") or os.getenv("DB_PATH")
+        if custom:
+            return Path(custom)
+        return self.STORAGE_DIR / "cricketiq.db"
+
+    @DB_PATH.setter
+    def DB_PATH(self, value: Path):
+        os.environ["DB_PATH"] = str(value)
     
     # Model assets
     MODEL_ASSET_PATH: Path = BASE_DIR / "app" / "models" / "assets" / "pose_landmarker_full.task"
